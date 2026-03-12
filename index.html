@@ -1,0 +1,2936 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <!-- 캐시 무효화 (iOS PWA 실시간 업데이트용) -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  
+  <!-- PWA 메타태그 -->
+  <meta name="theme-color" content="#1e293b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="KFI 비서">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="소방산업 지원사업 비서">
+  
+  <title>소방산업 지원사업 비서</title>
+  
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+  
+  <!-- 자동 업데이트 버전 체크 -->
+  <script>
+    (function() {
+      const CURRENT_VERSION = '20260312-002'; // 배포할 때마다 변경
+      const CHECK_KEY = 'kfi_last_version_check';
+      const now = Date.now();
+      const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
+      // 1시간에 한 번만 체크 (과도한 요청 방지)
+      if (now - lastCheck < 60 * 60 * 1000) return;
+      localStorage.setItem(CHECK_KEY, now);
+      fetch('./version.json?t=' + now, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.version && data.version !== CURRENT_VERSION) {
+            console.log('[KFI] 새 버전 감지:', data.version, '→ 새로고침');
+            caches.keys().then(names => Promise.all(names.map(n => caches.delete(n))))
+              .finally(() => location.reload(true));
+          }
+        })
+        .catch(() => {}); // 오프라인이거나 version.json 없으면 무시
+    })();
+  </script>
+
+  <!-- PWA 서비스워커 등록 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // 인라인 서비스워커 (별도 파일 불필요)
+        const swCode = `
+          const CACHE_NAME = 'kfi-v1';
+          const CACHE_URLS = ['./', './index.html'];
+          self.addEventListener('install', e => {
+            e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CACHE_URLS)).then(() => self.skipWaiting()));
+          });
+          self.addEventListener('activate', e => {
+            e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+          });
+          self.addEventListener('fetch', e => {
+            // version.json은 항상 네트워크에서 (캐시 금지)
+            if (e.request.url.includes('version.json')) {
+              e.respondWith(fetch(e.request, { cache: 'no-store' }).catch(() => new Response('{}', {headers:{'Content-Type':'application/json'}})));
+              return;
+            }
+            // Firebase/CDN은 네트워크 우선
+            if (e.request.url.includes('firebase') || e.request.url.includes('cdnjs') || e.request.url.includes('cdn.tailwind')) {
+              e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+              return;
+            }
+            // 나머지는 캐시 우선
+            e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+          });
+        `;
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(swUrl)
+          .then(reg => console.log('[KFI] SW 등록:', reg.scope))
+          .catch(err => console.log('[KFI] SW 실패:', err));
+      });
+    }
+  </script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    const manifest = {
+      name: "KFI 지원사업 비서",
+      short_name: "KFI 비서",
+      description: "한국소방산업기술원 소방산업 지원사업 신청 시스템",
+      start_url: "./",
+      display: "standalone",
+      background_color: "#1d408b",
+      theme_color: "#1d408b",
+      orientation: "portrait",
+      icons: [{
+        src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%231e3a5f'/><text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' font-size='200' font-family='Arial Black,sans-serif' font-weight='900' fill='white'>KFI</text></svg>",
+        sizes: "512x512",
+        type: "image/svg+xml",
+        purpose: "any maskable"
+      }]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    const manifestURL = URL.createObjectURL(manifestBlob);
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = manifestURL;
+    document.head.appendChild(link);
+  </script>
+  
+  <!-- Firebase compat SDK (모듈 방식 대신 compat 사용: file://, GitHub Pages 모두 호환) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCHJcVV4gaHKAA8YeJJ56zEoREXqCizrW4",
+      authDomain: "test-kfi.firebaseapp.com",
+      projectId: "test-kfi",
+      storageBucket: "test-kfi.firebasestorage.app",
+      messagingSenderId: "30541110364",
+      appId: "1:30541110364:web:d6be094c192e146d891a99"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // HWP 리플릿 기준 지원사업 데이터
+    const defaultPrograms = [
+      // ===== 국내사업 =====
+      { 
+        id: 1, 
+        title: "국내외 특허출원·등록 경비 지원",
+        category: "국내사업",
+        subcategory: "특허·경비",
+        status: "open",
+        amount: "최대 500만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "소방관계 법령에 따른 형식승인·성능인증 등 인증 취득에 소요되는 비용 및 기술원 사전 의뢰시험 수수료를 지원합니다. 발명전시회 참가비, 홍보경비(최대 500만원, 비용 50% 이내), ESG 인증경비(최대 200만원) 포함. 설명회 3월·8월(예정), 누리집 온라인 접수.",
+        target: "소방산업 관련 기업·단체",
+        targetTags: ["소방산업체", "제조업체"],
+        details: [
+          { item: "형식승인·성능인증 등 인증경비", value: "취득 비용 지원 (특허별 차년도까지)" },
+          { item: "사전 의뢰시험 수수료", value: "인증 취득 관련 기술원 수행분" },
+          { item: "홍보경비", value: "최대 500만원 (비용 50% 이내)" },
+          { item: "발명전시회 참가비", value: "지원" },
+          { item: "ESG 인증경비", value: "최대 200만원" },
+          { item: "기술상담(내부)", value: "특허권 확보 절차 멘토링, 선행기술 조사·사업성 검토" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "사업자등록증", "경비 증빙서류"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 2, 
+        title: "소방산업체 금융 경비 지원",
+        category: "국내사업",
+        subcategory: "금융",
+        status: "open",
+        amount: "연 50만원 한도",
+        openDate: "2026-04-01",
+        deadline: "2026-09-30",
+        description: "소방산업체의 안정적인 경영활동을 위해 이행(하자)보증보험료 및 융자금리 이자비용을 지원합니다. 접수: 4월~8월 / 지원금 지급: 10월(예정).",
+        target: "소방산업 관련 기업",
+        targetTags: ["소방산업체", "제조업체"],
+        details: [
+          { item: "HP보증보험료", value: "50% 지원 (연 50만원 한도)" },
+          { item: "융자금리", value: "실 지급이자의 50% (연 50만원 한도)" },
+          { item: "접수기간", value: "4월~8월" },
+          { item: "지급 시기", value: "10월(예정)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "보험료 납입영수증", "이자납입 증빙서류"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 3, 
+        title: "지식재산(IP) 금융 지원사업",
+        category: "국내사업",
+        subcategory: "IP금융",
+        status: "open",
+        amount: "최대 300만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "IP 관련 대출(담보·운전자금 등)의 2% 이자를 지원합니다. 총 3.5천만원 예산 한도 내 선착순 모집, 예산 소진 시 조기 마감됩니다.",
+        target: "최근 5년 이내(2021~2025년) 특허경비 지원사업 참여업체 중, 공고일 기준 최근 1년 이내 기술원 인증·검사 실적(방염성능검사 및 소방장비인증(KFAC) 포함) 보유 업체",
+        targetTags: ["특허보유", "소방산업체"],
+        details: [
+          { item: "지원내용", value: "IP 관련 대출 이자 2% 지원" },
+          { item: "지원한도", value: "최대 300만원 이내" },
+          { item: "사업예산", value: "총 3.5천만원 한도 (선착순)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "사업자등록증", "대출 관련 증빙서류"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 4, 
+        title: "품질경영 리더기업 육성",
+        category: "국내사업",
+        subcategory: "육성",
+        status: "open",
+        amount: "지원금 100만원",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "「전문인재 양성사업」 참여 소방용품·장비 제조사를 대상으로 리더기업을 선발합니다. 기존 지원사업 우대 및 경영 안정화 재정지원, 교육 수료 후 지원금 100만원 지급 및 전시회 참가 가점 제공.",
+        target: "소방산업기술원 「전문인재 양성사업」 참여 소방용품·장비 제조사 (형식승인·성능인증·KFI인증·소방장비인증(KFAC)·방염성능검사 해당 업체)",
+        targetTags: ["제조업체", "소방산업체"],
+        details: [
+          { item: "선발방법", value: "「전문인재 양성사업」 신청 시 리더기업 선발" },
+          { item: "지원금", value: "교육 수료 후 100만원 지급" },
+          { item: "추가혜택", value: "기존 지원사업 우대 + 전시회 참가 가점" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["신청서", "사업자등록증"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 5, 
+        title: "제18회 대한민국 소방산업대상",
+        category: "국내사업",
+        subcategory: "포상",
+        status: "open",
+        amount: "행정안전부장관상 등",
+        openDate: "2026-01-01",
+        deadline: "2026-09-30",
+        description: "소방산업 발전에 기여한 우수 기업·개인을 발굴하여 포상합니다. 기술·경영 부문(2개 부문 5개 훈격 17개 상)과 제품디자인 부문(1개 부문 3개 훈격 4개 상)으로 구성됩니다. ※ 시상규모 등 세부내용은 추후 변경될 수 있음.",
+        target: "소방산업 발전에 기여한 기업·개인 및 소방제품의 기술응용이 가능한 실용적인 디자인을 출품한 작품",
+        targetTags: ["소방산업체", "기술혁신"],
+        details: [
+          { item: "기술·경영 부문", value: "2개 부문 5개 훈격 17개 상" },
+          { item: "제품디자인 부문", value: "1개 부문 3개 훈격 4개 상" },
+          { item: "주요 시상", value: "행정안전부장관상·소방청장상·한국소방산업기술원장상·한국발명진흥회장상" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "support@kfi.or.kr" },
+        documents: ["추천서", "실적 증빙서류"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+
+      // ===== 해외사업 =====
+      { 
+        id: 7, 
+        title: "해외 소방전시회 한국관 운영 (NFPA)", 
+        category: "해외사업",
+        subcategory: "전시회",
+        status: "closed", 
+        amount: "부스비용 지원", 
+        deadline: "2025-05-31", 
+        description: "미국 시카고에서 개최되는 세계 최대 규모의 소방전시회 NFPA Conference & Expo에 한국관을 운영합니다. 부스 임차료, 장치비, 통역비 등을 지원하며, 해외 바이어 발굴 기회를 제공합니다.", 
+        target: "기술원 형식승인(인정) 및 제품검사 실적 1년 이상 제조업체",
+        targetTags: ["제조업체", "수출희망"],
+        details: [
+          { item: "전시회", value: "NFPA Conference & Expo" },
+          { item: "일정", value: "2025.06.16~18" }, 
+          { item: "장소", value: "미국 시카고" },
+          { item: "지원내용", value: "부스비, 장치비, 통역비" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["참가신청서", "사업자등록증", "수출실적증명서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 8, 
+        title: "해외 소방전시회 한국관 운영 (SIDEX)", 
+        category: "해외사업",
+        subcategory: "전시회",
+        status: "open", 
+        amount: "부스비용 지원", 
+        deadline: "2025-08-31", 
+        description: "싱가포르에서 개최되는 아시아 최대 규모의 소방안전 전시회 SIDEX에 한국관을 운영합니다. 동남아시아 시장 진출을 희망하는 기업에게 최적의 기회입니다.", 
+        target: "기술원 형식승인(인정) 및 제품검사 실적 1년 이상 제조업체",
+        targetTags: ["제조업체", "수출희망"],
+        details: [
+          { item: "전시회", value: "SIDEX Singapore" },
+          { item: "일정", value: "2025.10.15~17" }, 
+          { item: "장소", value: "싱가포르" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["참가신청서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 9, 
+        title: "해외 소방전시회 한국관 운영 (Intersec)", 
+        category: "해외사업",
+        subcategory: "전시회",
+        status: "open", 
+        amount: "부스비용 지원", 
+        deadline: "2025-11-30", 
+        description: "두바이에서 개최되는 중동 최대 규모의 보안·소방 전시회 Intersec에 한국관을 운영합니다. 중동 및 아프리카 시장 진출의 교두보가 됩니다.", 
+        target: "기술원 형식승인(인정) 및 제품검사 실적 1년 이상 제조업체",
+        targetTags: ["제조업체", "수출희망"],
+        details: [
+          { item: "전시회", value: "Intersec Dubai" },
+          { item: "일정", value: "2026.01.12~14" }, 
+          { item: "장소", value: "UAE 두바이" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["참가신청서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 10, 
+        title: "해외인증 획득 경비 지원", 
+        category: "해외사업",
+        subcategory: "인증",
+        status: "open", 
+        amount: "최대 3천만원", 
+        deadline: "2025-06-30", 
+        description: "해외시장 진출에 필수적인 해외 소방인증(UL, FM, CE 등) 획득에 소요되는 비용을 지원합니다. 인증시험비, 컨설팅비, 공장심사비 등을 지원받으실 수 있습니다.", 
+        target: "기술원 형식승인(인정) 및 제품검사 실적 1년 이상 제조업체",
+        targetTags: ["제조업체", "수출희망", "해외인증"],
+        details: [
+          { item: "인증당 지원금", value: "최대 1,500만원" }, 
+          { item: "기업당 최대", value: "3,000만원 (2개 인증)" },
+          { item: "지원비율", value: "총 비용의 70%" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["신청서", "견적서", "사업자등록증"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 11, 
+        title: "해외 조달시장 개척단 파견", 
+        category: "해외사업",
+        subcategory: "개척단",
+        status: "closed", 
+        amount: "파견비용 지원", 
+        deadline: "2025-04-30", 
+        description: "해외 조달시장 개척을 위한 기업 파견단을 구성하여 현지 바이어 상담, 시장조사, 네트워킹 기회를 제공합니다. 항공료, 숙박비, 통역비 등을 지원합니다.", 
+        target: "해외 수출을 희망하는 소방산업체",
+        targetTags: ["소방산업체", "수출희망"],
+        details: [
+          { item: "지원내용", value: "항공료, 숙박비, 통역비" },
+          { item: "2025년 파견지", value: "멕시코 등" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["참가신청서", "사업자등록증"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 12, 
+        title: "수출 마케팅 경비 지원", 
+        category: "해외사업",
+        subcategory: "마케팅",
+        status: "open", 
+        amount: "연 500만원", 
+        deadline: "2025-11-30", 
+        description: "해외시장 개척을 위한 마케팅 활동 비용을 지원합니다. 해외 대리점 확보, 현지 마케팅, 홍보물 제작 등의 비용을 지원받으실 수 있습니다.", 
+        target: "해외 수출 실적 또는 수출계획 보유 기업",
+        targetTags: ["수출실적", "수출희망"],
+        details: [
+          { item: "연간 한도", value: "500만원" },
+          { item: "지원비율", value: "총 비용의 70%" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["마케팅 계획서", "사업자등록증"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 13, 
+        title: "온·오프라인 수출상담회 개최", 
+        category: "해외사업",
+        subcategory: "상담회",
+        status: "always", 
+        amount: "무료 참가", 
+        deadline: "상시", 
+        description: "국내외 바이어와의 1:1 수출상담 기회를 제공합니다. K-Fire Pavilion(오프라인) 및 Tradekorea.com(온라인)을 통해 상시 바이어 매칭 서비스를 이용하실 수 있습니다.", 
+        target: "해외 수출을 희망하는 소방산업체",
+        targetTags: ["소방산업체", "수출희망"],
+        details: [
+          { item: "오프라인", value: "K-Fire Pavilion" }, 
+          { item: "온라인", value: "Tradekorea.com" },
+          { item: "참가비", value: "무료" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["참가신청서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 14, 
+        title: "소방산업체 수출보증보험 가입지원", 
+        category: "해외사업",
+        subcategory: "보험",
+        status: "open", 
+        amount: "30~50만원", 
+        deadline: "2025-11-30", 
+        description: "수출 거래 시 발생할 수 있는 대금 미회수 위험에 대비하여 수출보증보험 가입비용을 지원합니다. 무역보험공사 보험료의 일부를 지원받으실 수 있습니다.", 
+        target: "해외 수출 실적 보유 기업",
+        targetTags: ["수출실적"],
+        details: [
+          { item: "소형기업", value: "30만원" }, 
+          { item: "중형기업", value: "50만원" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "global@kfi.or.kr" }, 
+        documents: ["신청서", "보험가입증명서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 15, 
+        title: "무역전문가 양성교육 운영", 
+        category: "해외사업",
+        subcategory: "교육",
+        status: "closed", 
+        amount: "무료 교육", 
+        deadline: "2025-04-30", 
+        description: "소방산업체 임직원을 대상으로 무역실무 전문교육을 제공합니다. 수출입 절차, 무역서류 작성, 해외마케팅 등 실무 중심의 교육을 무료로 수강하실 수 있습니다.", 
+        target: "소방산업 종사자 (기수당 25명 내외)",
+        targetTags: ["소방산업체", "임직원"],
+        details: [
+          { item: "기초과정", value: "4월" }, 
+          { item: "심화과정", value: "5월" },
+          { item: "정원", value: "25명/기수" },
+          { item: "교육비", value: "무료" }
+        ], 
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "edu@kfi.or.kr" }, 
+        documents: ["교육신청서"],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+
+      // ===== 정보제공 =====
+      { 
+        id: 16, 
+        title: "소방산업 통계조사",
+        category: "정보제공",
+        subcategory: "통계조사",
+        status: "always",
+        amount: "무료 정보제공",
+        openDate: "2026-01-01",
+        deadline: "상시",
+        description: "국가승인통계(제156010호)로 통계청 소방산업 특수분류체계에 따른 소방산업체의 현황을 매년 1회 정기 조사합니다. 2025년 통계조사 결과 기준일: 2024년 12월 31일.",
+        target: "소방산업 관계자 및 일반 국민",
+        targetTags: ["정보필요"],
+        details: [
+          { item: "조사항목", value: "소방산업체 일반현황·인력현황·경영현황·연구개발 현황 등" },
+          { item: "조사대상", value: "소방공사업·소방관리업·소방제조업·소방설계업·소방감리업·소방도매 등" },
+          { item: "조사주기", value: "매년 1회 정기 조사" },
+          { item: "기준일", value: "2024년 12월 31일 (2025년 통계조사 결과)" },
+          { item: "열람방법", value: "한국소방산업기술원 누리집 (www.kfi.or.kr)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "research@kfi.or.kr" },
+        documents: [],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+      { 
+        id: 17, 
+        title: "소방산업 수요조사",
+        category: "정보제공",
+        subcategory: "수요조사",
+        status: "always",
+        amount: "무료 정보제공",
+        openDate: "2026-01-01",
+        deadline: "상시",
+        description: "차기년도 공공부문(정부부처·공공기관 등) 및 민간부문(종합건설사·소방공사업) 소방 관련 수요 예산을 조사합니다. 2026년 수요조사 결과 기준일: 2025년 12월 31일.",
+        target: "소방산업 관계자 및 일반 국민",
+        targetTags: ["정보필요"],
+        details: [
+          { item: "조사항목", value: "소방장비 구입·소방시설 신규·유지보수 등의 사업 예산" },
+          { item: "조사대상", value: "공공부문(정부부처·공공기관), 민간부문(종합건설사·소방공사업)" },
+          { item: "기준일", value: "2025년 12월 31일 (2026년 수요조사 결과)" },
+          { item: "열람방법", value: "한국소방산업기술원 누리집 (www.kfi.or.kr)" }
+        ],
+        contact: { dept: "산업진흥센터", phone: "031-289-0000", email: "research@kfi.or.kr" },
+        documents: [],
+        applyUrl: "https://www.kfi.or.kr/menu/support"
+      },
+    ]
+
+    const defaultExhibitions = [
+      { id: 1, name: "NFPA Conference & Expo", location: "미국 시카고", country: "🇺🇸", startDate: "2025-06-16", endDate: "2025-06-18", color: "from-teal-600 to-teal-400" },
+      { id: 2, name: "SIDEX Singapore", location: "싱가포르", country: "🇸🇬", startDate: "2025-10-15", endDate: "2025-10-17", color: "from-purple-600 to-purple-400" },
+      { id: 3, name: "Intersec Dubai", location: "UAE 두바이", country: "🇦🇪", startDate: "2026-01-12", endDate: "2026-01-14", color: "from-red-600 to-red-400" }
+    ];
+
+    window.defaultPrograms = defaultPrograms;
+    window.defaultExhibitions = defaultExhibitions;
+
+    window.firebaseAPI = {
+      auth, db,
+      
+      signUp: async (email, password, userData) => {
+        try {
+          const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+          const user = userCredential.user;
+          await db.collection("users").doc(user.uid).set({
+            ...userData, email, uid: user.uid, bookmarks: [], preferences: {},
+            createdAt: new Date().toISOString(),
+            isAdmin: email === 'admin@kfi.or.kr'
+          });
+          return { success: true, user };
+        } catch (error) { return { success: false, error: error.code }; }
+      },
+
+      signIn: async (email, password) => {
+        try {
+          const userCredential = await auth.signInWithEmailAndPassword(email, password);
+          return { success: true, user: userCredential.user };
+        } catch (error) { return { success: false, error: error.code }; }
+      },
+
+      signOut: async () => { try { await auth.signOut(); window._testUser = null; window._testUserData = null; window._isTestAdmin = null; return { success: true }; } catch (error) { return { success: false }; } },
+      
+      setTestUser: (testUser, testUserData, isAdmin) => {
+        window._testUser = testUser;
+        window._testUserData = testUserData;
+        window._isTestAdmin = isAdmin;
+        window.dispatchEvent(new CustomEvent('testUserLogin'));
+      },
+      
+      onAuthChange: (callback) => auth.onAuthStateChanged(callback),
+
+      getUserProfile: async (uid) => {
+        try {
+          const docSnap = await db.collection("users").doc(uid).get();
+          if (docSnap.exists) return { success: true, data: docSnap.data() };
+          return { success: false };
+        } catch (error) { return { success: false }; }
+      },
+
+      updateUserProfile: async (uid, data) => {
+        try {
+          await db.collection("users").doc(uid).update(data);
+          return { success: true };
+        } catch (error) { return { success: false }; }
+      },
+
+      subscribeUsers: (callback) => {
+        const q = db.collection("users").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
+          const users = []; snapshot.forEach((doc) => users.push({ id: doc.id, ...doc.data() })); callback(users);
+        });
+      },
+
+      updateBookmarks: async (uid, bookmarks) => {
+        try { await db.collection("users").doc(uid).update({ bookmarks }); return { success: true }; }
+        catch (error) { return { success: false }; }
+      },
+
+      initializePrograms: async () => {
+        try {
+          const snapshot = await db.collection("programs").get();
+          if (snapshot.empty) {
+            // ✅ 최초 1회만 실행 - Firestore에 데이터가 한 건이라도 있으면 절대 실행 안 됨
+            const batch = db.batch();
+            defaultPrograms.forEach((program) => batch.set(db.collection("programs").doc(String(program.id)), program));
+            await batch.commit();
+            console.log('[KFI] 초기 데이터 Firestore 적재 완료');
+          } else {
+            console.log('[KFI] Firestore 데이터 존재 - 초기화 건너뜀 (' + snapshot.size + '개)');
+          }
+          return { success: true };
+        } catch (error) { return { success: false }; }
+      },
+
+      subscribePrograms: (callback) => {
+        const q = db.collection("programs").orderBy("sortOrder").orderBy("id");
+        return q.onSnapshot((snapshot) => {
+          const programs = [];
+          snapshot.forEach((doc) => programs.push({ docId: doc.id, ...doc.data() }));
+          callback(programs.length > 0 ? programs : window.defaultPrograms || []);
+        }, (error) => {
+          // sortOrder 인덱스 없으면 id 순으로 폴백
+          db.collection("programs").orderBy("id").get().then(snap => {
+            const programs = [];
+            snap.forEach(doc => programs.push({ docId: doc.id, ...doc.data() }));
+            callback(programs.length > 0 ? programs : window.defaultPrograms || []);
+          }).catch(() => callback(window.defaultPrograms || []));
+        });
+      },
+
+      submitApplication: async (application) => {
+        try {
+          const docRef = await db.collection("applications").add({
+            ...application, status: "submitted", step: 1,
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+          });
+          return { success: true, id: docRef.id };
+        } catch (error) { 
+          console.error("Application error:", error);
+          return { success: false, error: error.message }; 
+        }
+      },
+
+      subscribeUserApplications: (uid, callback) => {
+        const q = db.collection("applications").where("userId", "==", uid).orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
+          const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
+        });
+      },
+
+      subscribeAllApplications: (callback) => {
+        const q = db.collection("applications").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
+          const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
+        });
+      },
+
+      updateApplicationStatus: async (docId, status, step, note = '') => {
+        try {
+          await db.collection("applications").doc(docId).update({ status, step, reviewNote: note, updatedAt: new Date().toISOString() });
+          return { success: true };
+        } catch (error) { return { success: false }; }
+      },
+
+      subscribeExhibitions: (callback) => {
+        const q = db.collection("exhibitions").orderBy("startDate");
+        return q.onSnapshot((snapshot) => {
+          const exhibitions = []; snapshot.forEach((doc) => exhibitions.push({ docId: doc.id, ...doc.data() })); callback(exhibitions);
+        }, (error) => {
+          callback(defaultExhibitions);
+        });
+      },
+
+      initializeExhibitions: async () => {
+        try {
+          const snapshot = await db.collection("exhibitions").get();
+          if (snapshot.empty) {
+            const batch = db.batch();
+            defaultExhibitions.forEach((ex) => batch.set(db.collection("exhibitions").doc(String(ex.id)), ex));
+            await batch.commit();
+          }
+          return { success: true };
+        } catch (error) { return { success: false }; }
+      },
+
+      // 방문 로그 기록
+      logVisit: async (userType, deviceId) => {
+        try {
+          const today = new Date().toISOString().slice(0, 10);
+          const statRef = db.collection("visitStats").doc(today);
+          const statSnap = await statRef.get();
+          let isUniqueToday = true;
+          if (statSnap.exists) {
+            const devices = statSnap.data().devices || [];
+            isUniqueToday = !devices.includes(deviceId);
+          }
+
+          await db.collection("visits").add({
+            userType, deviceId,
+            visitedAt: new Date().toISOString(),
+            date: today,
+            isUnique: isUniqueToday
+          });
+
+          if (statSnap.exists) {
+            const d = statSnap.data();
+            const updateData = {
+              total: (d.total || 0) + 1,
+              [userType]: (d[userType] || 0) + 1,
+              updatedAt: new Date().toISOString()
+            };
+            if (isUniqueToday) {
+              updateData.unique = (d.unique || 0) + 1;
+              updateData[`unique_${userType}`] = (d[`unique_${userType}`] || 0) + 1;
+              updateData.devices = [...(d.devices || []), deviceId];
+            }
+            await statRef.update(updateData);
+          } else {
+            await statRef.set({
+              date: today, total: 1, unique: 1,
+              [userType]: 1, [`unique_${userType}`]: 1,
+              devices: [deviceId],
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch(e) {}
+      },
+
+      subscribeVisitStats: (callback) => {
+        const q = db.collection("visitStats").orderBy("date", "desc");
+        return q.onSnapshot((snapshot) => {
+          const stats = []; snapshot.forEach((doc) => stats.push({ id: doc.id, ...doc.data() })); callback(stats);
+        }, () => callback([]));
+      },
+
+      // 프로그램 CRUD
+      addProgram: async (program) => {
+        try {
+          const newId = Date.now();
+          const docRef = db.collection("programs").doc(String(newId));
+          await docRef.set({ ...program, id: newId, createdAt: new Date().toISOString() });
+          return { success: true, id: newId };
+        } catch(e) { return { success: false, error: e.message }; }
+      },
+      updateProgram: async (docId, data) => {
+        try {
+          await db.collection("programs").doc(docId).update({ ...data, updatedAt: new Date().toISOString() });
+          return { success: true };
+        } catch(e) { return { success: false }; }
+      },
+      updateProgramOrders: async (orderedPrograms) => {
+        try {
+          const batch = db.batch();
+          orderedPrograms.forEach((p, idx) => {
+            const docId = p.docId || String(p.id);
+            batch.update(db.collection("programs").doc(docId), { sortOrder: idx });
+          });
+          await batch.commit();
+          return { success: true };
+        } catch(e) { return { success: false, error: e.message }; }
+      },
+      deleteProgram: async (docId) => {
+        try {
+          await db.collection("programs").doc(docId).delete();
+          return { success: true };
+        } catch(e) { return { success: false }; }
+      },
+
+      addNotification: async (notification) => {
+        try {
+          await db.collection("notifications").add({
+            ...notification,
+            createdAt: new Date().toISOString(),
+            read: false
+          });
+          return { success: true };
+        } catch (error) { return { success: false }; }
+      },
+
+      subscribeNotifications: (uid, callback) => {
+        const q = db.collection("notifications").where("userId", "==", uid).orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
+          const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
+        }, () => callback([]));
+      },
+
+      subscribeAllNotifications: (callback) => {
+        const q = db.collection("notifications").orderBy("createdAt", "desc");
+        return q.onSnapshot((snapshot) => {
+          const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
+        }, () => callback([]));
+      },
+
+      updateExhibition: async (docId, data) => {
+        try {
+          await db.collection("exhibitions").doc(docId).update({ ...data, updatedAt: new Date().toISOString() });
+          return { success: true };
+        } catch(e) { return { success: false, error: e.message }; }
+      },
+      addExhibition: async (ex) => {
+        try {
+          const newId = Date.now();
+          await db.collection("exhibitions").doc(String(newId)).set({ ...ex, id: newId, createdAt: new Date().toISOString() });
+          return { success: true };
+        } catch(e) { return { success: false, error: e.message }; }
+      },
+      deleteExhibition: async (docId) => {
+        try {
+          await db.collection("exhibitions").doc(docId).delete();
+          return { success: true };
+        } catch(e) { return { success: false }; }
+      },
+    };
+
+    window.firebaseAPI.initializePrograms();
+    window.firebaseAPI.initializeExhibitions();
+    window.dispatchEvent(new Event('firebaseReady'));
+  </script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif; }
+    #root { height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .animate-fade-in { animation: fadeIn 0.2s ease-out; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .live-badge { animation: pulse 2s ease-in-out infinite; }
+    @keyframes spinSlow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .animate-spin-slow { animation: spinSlow 8s linear infinite; }
+    @supports (padding: env(safe-area-inset-top)) {
+      .safe-top { padding-top: env(safe-area-inset-top); }
+      .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    }
+    @media all and (display-mode: standalone) { body { background-color: #1e293b; } }
+    /* 모바일 입력 필드 최적화 - 확대 방지 */
+    input, textarea, select { font-size: 16px !important; touch-action: manipulation; }
+    button { touch-action: manipulation; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+    @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    .skeleton { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 8px; }
+    .nav-indicator { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 20px; height: 3px; background: #2563eb; border-radius: 0 0 3px 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+
+    // 현재 날짜 (한국 시간 기준)
+    const getTodayKST = () => {
+      const now = new Date();
+      // KST = UTC+9, 날짜 비교용으로 시간 제거
+      const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      return new Date(kst.toISOString().slice(0, 10));
+    };
+    const TODAY = getTodayKST();
+    
+    const calculateDday = (deadline) => {
+      if (!deadline || deadline === "상시" || deadline === "수시" || deadline === "연중상시") return null;
+      // 다양한 날짜 포맷 처리: "2025.12.31", "2025-12-31", "2025년 12월 31일"
+      let normalized = deadline
+        .replace(/년\s*/g, '-').replace(/월\s*/g, '-').replace(/일/g, '')
+        .replace(/\./g, '-').trim();
+      // "2025-12-31 18:00" → "2025-12-31"
+      normalized = normalized.split(' ')[0];
+      const deadlineDate = new Date(normalized);
+      if (isNaN(deadlineDate.getTime())) return null;
+      const diffTime = deadlineDate - TODAY;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays;
+    };
+
+    const Icon = ({ name, className = "w-5 h-5" }) => {
+      const icons = {
+        search: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>,
+        bell: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
+        user: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>,
+        home: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>,
+        fileText: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+        calendar: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+        star: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>,
+        starFilled: <svg className={className} fill="currentColor" stroke="currentColor" viewBox="0 0 24 24"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>,
+        chevronRight: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="9,18 15,12 9,6"/></svg>,
+        chevronLeft: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="15,18 9,12 15,6"/></svg>,
+        clock: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>,
+        dollarSign: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
+        mapPin: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>,
+        phone: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>,
+        mail: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>,
+        building: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/></svg>,
+        settings: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+        helpCircle: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+        x: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+        check: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
+        logOut: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+        users: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+        bookOpen: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
+        send: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+        externalLink: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>,
+        filter: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+        refresh: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="m3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+        target: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+        messageCircle: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>,
+        info: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
+        sparkles: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M19 17v4"/><path d="M17 19h4"/></svg>,
+        wrench: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>,
+        bug: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>,
+      };
+      return icons[name] || null;
+    };
+
+    const LoadingSpinner = ({ text = "로딩중..." }) => (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
+        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl"><span className="text-slate-800 font-bold text-2xl">KFI</span></div>
+        <div className="w-8 h-8 border-4 border-slate-600 border-t-white rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400">{text}</p>
+      </div>
+    );
+
+    const LiveBadge = () => (<span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full live-badge"><span className="w-1.5 h-1.5 bg-white rounded-full"></span>LIVE</span>);
+
+    const getDdayText = (dday) => {
+      if (dday === null) return "상시";
+      if (dday < 0) return "마감";
+      if (dday === 0) return "D-Day";
+      return `D-${dday}`;
+    };
+    const getDdayColor = (dday) => { 
+      if (dday === null) return "bg-blue-100 text-blue-700"; 
+      if (dday < 0) return "bg-gray-200 text-gray-500";
+      if (dday <= 3) return "bg-red-100 text-red-600"; 
+      if (dday <= 7) return "bg-amber-100 text-amber-600"; 
+      return "bg-green-100 text-green-600"; 
+    };
+    const getStatusBadge = (status, dday) => { 
+      if (status === 'closed' || (dday !== null && dday < 0)) return { text: "마감", class: "bg-gray-200 text-gray-500" };
+      const badges = { 
+        open: { text: "접수중", class: "bg-emerald-100 text-emerald-700" }, 
+        upcoming: { text: "접수예정", class: "bg-blue-100 text-blue-700" }, 
+        always: { text: "상시", class: "bg-purple-100 text-purple-700" }, 
+        submitted: { text: "접수완료", class: "bg-blue-100 text-blue-700" }, 
+        reviewing: { text: "심사중", class: "bg-amber-100 text-amber-700" }, 
+        approved: { text: "승인", class: "bg-emerald-100 text-emerald-700" }, 
+        rejected: { text: "반려", class: "bg-red-100 text-red-700" } 
+      }; 
+      return badges[status] || badges.closed; 
+    };
+    const getCategoryColor = (category) => { 
+      const colors = { 
+        "국내사업": "bg-blue-50 text-blue-700", 
+        "해외사업": "bg-green-50 text-green-700", 
+        "정보제공": "bg-indigo-50 text-indigo-700" 
+      }; 
+      return colors[category] || "bg-gray-50 text-gray-700"; 
+    };
+    const getFirebaseErrorMessage = (errorCode) => { 
+      const messages = { 
+        'auth/email-already-in-use': '이미 사용중인 이메일입니다.', 
+        'auth/invalid-email': '유효하지 않은 이메일입니다.', 
+        'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.', 
+        'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.' 
+      }; 
+      return messages[errorCode] || '오류가 발생했습니다.'; 
+    };
+
+    // === 검색 입력 컴포넌트 (로컬 state와 부모 state 완전 분리 - 타이핑 버그 방지) ===
+    const AppSearchBar = ({ onQueryChange, resetKey }) => {
+      const [val, setVal] = React.useState('');
+
+      // 초기화(resetKey 변경) 시에만 val 리셋
+      React.useEffect(() => {
+        setVal('');
+        onQueryChange('');
+      }, [resetKey]);
+
+      // val 변경 시 300ms 디바운스로 부모 업데이트 (타이핑 중 리렌더 차단)
+      React.useEffect(() => {
+        const timer = setTimeout(() => {
+          onQueryChange(val.trim());
+        }, 300);
+        return () => clearTimeout(timer);
+      }, [val]);
+
+      return (
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <Icon name="search" className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              enterKeyHint="search"
+              placeholder="검색어를 입력하세요"
+              value={val}
+              onChange={e => setVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { onQueryChange(val.trim()); } }}
+              className="w-full pl-10 pr-10 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {val && (
+              <button type="button"
+                onClick={() => { setVal(''); onQueryChange(''); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button type="button" onClick={() => onQueryChange(val.trim())}
+            className="px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 rounded-xl text-white flex-shrink-0">
+            <Icon name="search" className="w-5 h-5" />
+          </button>
+        </div>
+      );
+    };  // ← AppSearchBar 닫기 (누락된 괄호 복구)
+
+    // ── ProgramEditForm: 독립 컴포넌트 (로컬 state → 타이핑 버그 없음) ──
+    const ProgramEditForm = ({ initial, onSave, onCancel }) => {
+      const inp = (field, fallback='') => initial ? (initial[field] ?? fallback) : fallback;
+
+      const [title,       setTitle]       = useState(inp('title'));
+      const [category,    setCategory]    = useState(inp('category','국내사업'));
+      const [subcategory, setSubcategory] = useState(inp('subcategory'));
+      const [status,      setStatus]      = useState(inp('status','open'));
+      const [amount,      setAmount]      = useState(inp('amount'));
+      const [openDate,    setOpenDate]    = useState(inp('openDate'));
+      const [deadline,    setDeadline]    = useState(inp('deadline','2026-09-30'));
+      const [description, setDescription]= useState(inp('description'));
+      const [target,      setTarget]      = useState(inp('target'));
+      const [applyUrl,    setApplyUrl]    = useState(inp('applyUrl'));
+      const [contactDept, setContactDept] = useState(inp('contact','')?.dept ?? '산업진흥센터');
+      const [contactPhone,setContactPhone]= useState(inp('contact','')?.phone ?? '031-289-0000');
+      const [contactEmail,setContactEmail]= useState(inp('contact','')?.email ?? '');
+      const [details,     setDetails]     = useState(initial?.details?.length ? initial.details : [{ item:'', value:'' }]);
+      const [documents,   setDocuments]   = useState(initial?.documents?.length ? initial.documents : ['']);
+      const [saving,      setSaving]      = useState(false);
+
+      const ic = 'w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400';
+
+      const handleSave = async () => {
+        const data = {
+          title, category, subcategory, status, amount, openDate, deadline,
+          description, target, applyUrl,
+          contact: { dept: contactDept, phone: contactPhone, email: contactEmail },
+          details: details.filter(d => d.item.trim() || d.value.trim()),
+          documents: documents.filter(d => d.trim()),
+        };
+        setSaving(true);
+        await onSave(data);
+        setSaving(false);
+      };
+
+      return (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
+          <h4 className="font-bold mb-3 text-slate-800">{initial ? `✏️ "${initial.title}" 수정` : '➕ 신규 사업 추가'}</h4>
+          <div className="space-y-2">
+            <p className="text-xs font-bold text-slate-500 mt-2">기본 정보</p>
+            <input placeholder="사업명 *" value={title} onChange={e=>setTitle(e.target.value)} className={ic} />
+            <select value={category} onChange={e=>setCategory(e.target.value)} className={ic}>
+              <option>국내사업</option><option>해외사업</option><option>정보제공</option>
+            </select>
+            <input placeholder="세부분류 (예: 특허, 해외인증)" value={subcategory} onChange={e=>setSubcategory(e.target.value)} className={ic} />
+            <select value={status} onChange={e=>setStatus(e.target.value)} className={ic}>
+              <option value="open">접수중</option>
+              <option value="always">상시</option>
+              <option value="upcoming">접수예정</option>
+              <option value="closed">마감</option>
+            </select>
+            <input placeholder="공고 시작일 (예: 2026-01-01)" value={openDate} onChange={e=>setOpenDate(e.target.value)} className={ic} />
+            <input placeholder="접수 마감일 (예: 2026-09-30 또는 상시)" value={deadline} onChange={e=>setDeadline(e.target.value)} className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">지원 내용</p>
+            <input placeholder="지원금액 (예: 최대 500만원)" value={amount} onChange={e=>setAmount(e.target.value)} className={ic} />
+            <textarea placeholder="사업 설명" value={description} onChange={e=>setDescription(e.target.value)} rows="3" className={ic} />
+            <textarea placeholder="지원대상" value={target} onChange={e=>setTarget(e.target.value)} rows="2" className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">지원 상세 항목 (항목명 / 내용)</p>
+            {details.map((d, i) => (
+              <div key={i} className="flex gap-1">
+                <input placeholder="항목명" value={d.item} onChange={e=>{ const n=[...details]; n[i]={...n[i],item:e.target.value}; setDetails(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <input placeholder="내용" value={d.value} onChange={e=>{ const n=[...details]; n[i]={...n[i],value:e.target.value}; setDetails(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <button type="button" onClick={()=>setDetails(details.filter((_,j)=>j!==i))} className="px-2 text-red-400 text-lg">×</button>
+              </div>
+            ))}
+            <button type="button" onClick={()=>setDetails([...details,{item:'',value:''}])} className="text-xs text-blue-600 font-semibold">+ 항목 추가</button>
+
+            <p className="text-xs font-bold text-slate-500 mt-2">제출 서류</p>
+            {documents.map((d, i) => (
+              <div key={i} className="flex gap-1">
+                <input placeholder="서류명" value={d} onChange={e=>{ const n=[...documents]; n[i]=e.target.value; setDocuments(n); }} className="border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 flex-1" />
+                <button type="button" onClick={()=>setDocuments(documents.filter((_,j)=>j!==i))} className="px-2 text-red-400 text-lg">×</button>
+              </div>
+            ))}
+            <button type="button" onClick={()=>setDocuments([...documents,''])} className="text-xs text-blue-600 font-semibold">+ 서류 추가</button>
+
+            <p className="text-xs font-bold text-slate-500 mt-2">문의처</p>
+            <input placeholder="부서명 (예: 산업진흥센터)" value={contactDept} onChange={e=>setContactDept(e.target.value)} className={ic} />
+            <input placeholder="전화번호 (예: 031-289-0000)" value={contactPhone} onChange={e=>setContactPhone(e.target.value)} className={ic} />
+            <input placeholder="이메일" value={contactEmail} onChange={e=>setContactEmail(e.target.value)} className={ic} />
+
+            <p className="text-xs font-bold text-slate-500 mt-2">신청 URL</p>
+            <input placeholder="신청 URL (https://...)" value={applyUrl} onChange={e=>setApplyUrl(e.target.value)} className={ic} />
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl bg-slate-200 text-sm font-semibold text-slate-700">취소</button>
+            <button type="button" onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">
+              {saving ? '저장중...' : initial ? '수정 저장' : '추가 저장'}
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    function App() {
+      const [firebaseReady, setFirebaseReady] = useState(false);
+      const [userType, setUserType] = useState(null); // null | 'general' | 'manufacturer' | 'admin'
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [currentUser, setCurrentUser] = useState(null);
+      const [userProfile, setUserProfile] = useState(null);
+      const [showAdminLogin, setShowAdminLogin] = useState(false);
+      const [programs, setPrograms] = useState(window.defaultPrograms || []);
+      const [exhibitions, setExhibitions] = useState([]);
+      const [allUsers, setAllUsers] = useState([]);
+      const [userApplications, setUserApplications] = useState([]);
+      const [allApplications, setAllApplications] = useState([]);
+      const [visitStats, setVisitStats] = useState([]);
+      const [bookmarks, setBookmarks] = useState([]);
+      const [notifications, setNotifications] = useState([]);
+      const [currentPage, setCurrentPage] = useState('home');
+      const [selectedProgram, setSelectedProgram] = useState(null);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [searchBarKey, setSearchBarKey] = useState(0);
+      const clearSearch = React.useCallback(() => { setSearchQuery(''); setSearchBarKey(k => k+1); }, []);
+      const [selectedCategory, setSelectedCategory] = useState('전체');
+      const [activeModal, setActiveModal] = useState(null);
+      const [reviewModal, setReviewModal] = useState(null);
+      const [adminFilter, setAdminFilter] = useState('전체');
+      const [statusFilter, setStatusFilter] = useState('전체');
+      const [showNotifications, setShowNotifications] = useState(false);
+      const [showPreferences, setShowPreferences] = useState(false);
+      const [userPreferences, setUserPreferences] = useState({ targetTags: [], subcategories: [] });
+      const [refreshing, setRefreshing] = useState(false);
+      const [showSplash, setShowSplash] = useState(true);
+      const [showChatbot, setShowChatbot] = useState(false);
+      const [chatMessages, setChatMessages] = useState([
+        { role: 'bot', text: '안녕하세요! KFI 지원사업 챗봇입니다. 무엇을 도와드릴까요?' }
+      ]);
+      const [programsLoading, setProgramsLoading] = useState(false);
+      // 사업관리 폼 상태 - App 최상위에서 관리 (탭 전환 시 초기화 방지)
+      const [showProgramForm, setShowProgramForm] = useState(false);
+      const [editProg, setEditProg] = useState(null);
+      const [adminTab, setAdminTab] = useState('dashboard');
+      const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+        try { return localStorage.getItem('kfi_notif_enabled') !== 'false'; } catch { return true; }
+      });
+      const [dismissedNotifs, setDismissedNotifs] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('kfi_dismissed_notifs') || '[]'); } catch { return []; }
+      });
+      const [showExhibitionForm, setShowExhibitionForm] = useState(false);
+      const [editExhibition, setEditExhibition] = useState(null);
+
+      useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
+
+      // 검색 쿼리는 AppSearchBar에서 직접 setSearchQuery 호출
+
+      // 관리자 Firebase 인증 상태
+      useEffect(() => {
+        if (!firebaseReady) return;
+        return window.firebaseAPI.onAuthChange(async (user) => {
+          if (user) {
+            // Firebase Auth 로그인 성공 = 관리자 (관리자 계정만 등록 전제)
+            const r = await window.firebaseAPI.getUserProfile(user.uid);
+            const profileData = (r.success && r.data) ? r.data : { uid: user.uid, name: '관리자', company: 'KFI', isAdmin: true };
+            setCurrentUser(user);
+            setUserProfile(profileData);
+            setIsAdmin(true);
+            setUserType('admin');
+          } else {
+            setCurrentUser(null);
+            setUserProfile(null);
+            setIsAdmin(false);
+            if (isAdmin) setUserType(null);
+          }
+        });
+      }, [firebaseReady]);
+
+      useEffect(() => {
+        if (!firebaseReady) return;
+        return window.firebaseAPI.subscribePrograms((p) => { setPrograms(p); setProgramsLoading(false); });
+      }, [firebaseReady]);
+      useEffect(() => { if (!firebaseReady) return; return window.firebaseAPI.subscribeExhibitions(setExhibitions); }, [firebaseReady]);
+      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeUsers(setAllUsers); }, [firebaseReady, isAdmin]);
+      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeAllApplications(setAllApplications); }, [firebaseReady, isAdmin]);
+      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeVisitStats(setVisitStats); }, [firebaseReady, isAdmin]);
+      useEffect(() => { if (!firebaseReady || isAdmin) return; 
+        const uid = getOrCreateDeviceId();
+        return window.firebaseAPI.subscribeUserApplications(uid, setUserApplications); 
+      }, [firebaseReady, isAdmin]);
+
+      // 알림 데이터 생성 (개선: 읽음처리, 중복방지, 활성화 토글)
+      useEffect(() => {
+        if (!programs.length || !notificationsEnabled) { setNotifications([]); return; }
+        const notifs = [];
+        programs.forEach(p => {
+          const dday = calculateDday(p.deadline);
+          if (dday !== null && dday >= 0 && dday <= 7) {
+            const id = `deadline-${p.id}-${p.deadline}`;
+            if (!dismissedNotifs.includes(id)) {
+              notifs.push({ id, type: 'deadline', title: dday === 0 ? '오늘 마감!' : `마감 ${dday}일 전`, message: p.title, programId: p.id, createdAt: new Date().toISOString() });
+            }
+          }
+        });
+        // 신규 알림: 공고일 기준 7일 이내 오픈 사업만 (항상 뜨는 버그 수정)
+        const recentNew = programs.filter(p => {
+          if (p.status !== 'open' || !p.openDate) return false;
+          const openDate = new Date(p.openDate);
+          const diffDays = Math.floor((TODAY - openDate) / (1000*60*60*24));
+          return diffDays >= 0 && diffDays <= 7;
+        }).slice(0, 3);
+        recentNew.forEach(p => {
+          const id = `new-${p.id}-${p.openDate}`;
+          if (!dismissedNotifs.includes(id)) {
+            notifs.push({ id, type: 'new', title: '신규 지원사업', message: p.title, programId: p.id, createdAt: new Date().toISOString() });
+          }
+        });
+        setNotifications(notifs);
+      }, [programs, notificationsEnabled, dismissedNotifs]);
+
+      const dismissNotification = (id, e) => {
+        e?.stopPropagation();
+        const updated = [...dismissedNotifs, id];
+        setDismissedNotifs(updated);
+        try { localStorage.setItem('kfi_dismissed_notifs', JSON.stringify(updated)); } catch {}
+      };
+      const toggleNotificationsEnabled = (val) => {
+        setNotificationsEnabled(val);
+        try { localStorage.setItem('kfi_notif_enabled', String(val)); } catch {}
+      };
+
+      const toggleBookmark = async (id, e) => {
+        e?.stopPropagation();
+        const newBookmarks = bookmarks.includes(id) ? bookmarks.filter(b => b !== id) : [...bookmarks, id];
+        setBookmarks(newBookmarks);
+        if (currentUser) await window.firebaseAPI.updateBookmarks(currentUser.uid, newBookmarks);
+        // 로컬 스토리지에도 저장 (비로그인 사용자)
+        try { localStorage.setItem('kfi_bookmarks', JSON.stringify(newBookmarks)); } catch(e) {}
+      };
+
+      // 북마크 로컬 복원
+      useEffect(() => {
+        try { const saved = localStorage.getItem('kfi_bookmarks'); if (saved) setBookmarks(JSON.parse(saved)); } catch(e) {}
+      }, []);
+      
+      const submitApplication = async (program) => {
+        try {
+          const deviceId = getOrCreateDeviceId();
+          const r = await window.firebaseAPI.submitApplication({
+            userId: currentUser?.uid || deviceId,
+            userEmail: currentUser?.email || userType + '@kfi.user',
+            userName: userProfile?.name || (userType === 'manufacturer' ? '제조업체 사용자' : '일반 사용자'),
+            userCompany: userProfile?.company || '미등록',
+            programId: program.id || program.docId,
+            programTitle: program.title,
+            programCategory: program.category
+          });
+          if (r.success) {
+            alert('신청이 완료되었습니다!\n\n관리자 검토 후 결과를 알려드립니다.');
+            setSelectedProgram(null);
+          } else { alert('신청 중 오류가 발생했습니다.\n다시 시도해주세요.'); }
+        } catch (error) { alert('신청 중 오류가 발생했습니다.'); }
+      };
+      
+      const handleLogout = async () => {
+        if (isAdmin) {
+          await window.firebaseAPI.signOut();
+          setCurrentUser(null); setUserProfile(null); setIsAdmin(false);
+        }
+        setUserType(null);
+        setCurrentPage('home');
+        setActiveModal(null);
+      };
+
+      // ===== 사업관리 CRUD 핸들러 (App 레벨 - 탭 전환해도 상태 유지) =====
+      const handleSaveProgram = async (data) => {
+        if (!data.title.trim()) { alert('사업명을 입력하세요.'); return; }
+        try {
+          if (editProg) {
+            const docId = editProg.docId || String(editProg.id);
+            const result = await window.firebaseAPI.updateProgram(docId, data);
+            if (result.success) { alert('수정되었습니다.'); }
+            else { alert('수정 중 오류가 발생했습니다.'); return; }
+          } else {
+            const result = await window.firebaseAPI.addProgram(data);
+            if (result.success) { alert('새 사업이 추가되었습니다.'); }
+            else { alert('추가 중 오류가 발생했습니다.'); return; }
+          }
+          setShowProgramForm(false);
+          setEditProg(null);
+        } catch(e) {
+          alert('저장 중 오류가 발생했습니다.');
+        }
+      };
+
+      const handleEditProg = (p) => {
+        setEditProg(p);
+        setShowProgramForm(true);
+        setAdminTab('programs');
+      };
+
+      const handleDeleteProg = async (p) => {
+        if (!confirm(`"${p.title}"\n\n삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+        const docId = p.docId || String(p.id);
+        const result = await window.firebaseAPI.deleteProgram(docId);
+        if (result.success) {
+          alert('삭제되었습니다.');
+        } else {
+          alert('삭제 중 오류가 발생했습니다.');
+        }
+      };
+
+      const handleCancelProgramForm = () => {
+        setShowProgramForm(false);
+        setEditProg(null);
+      };
+
+      const savePreferences = async () => {
+        if (currentUser) {
+          await window.firebaseAPI.updateUserProfile(currentUser.uid, { preferences: userPreferences });
+        }
+        try { localStorage.setItem('kfi_prefs', JSON.stringify(userPreferences)); } catch(e) {}
+        alert('맞춤 설정이 저장되었습니다.');
+        setShowPreferences(false);
+      };
+
+      const handleRefresh = async () => {
+        setRefreshing(true);
+        // 데이터 새로고침 시뮬레이션
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        setRefreshing(false);
+      };
+
+      // 스플래시 화면 타이머
+      useEffect(() => {
+        const timer = setTimeout(() => setShowSplash(false), 2500);
+        return () => clearTimeout(timer);
+      }, []);
+
+      // 챗봇 응답 로직
+      const chatbotResponses = {
+        '특허': '특허 관련 지원사업으로는 "국내외 특허 출원·등록 경비 지원"이 있습니다. 최대 500만원까지 지원받으실 수 있으며, 국내특허 출원 100만원, 등록 100만원, 해외특허 출원 200만원, 등록 300만원을 지원합니다.',
+        '해외': '해외 진출 관련 지원사업으로는 해외인증 획득 지원(최대 70%), 해외전시회 참가 지원, 수출상담회 개최 등이 있습니다. 자세한 내용은 지원사업 목록에서 확인해주세요.',
+        '신청': '지원사업 신청은 홈 화면에서 원하시는 지원사업을 선택한 후 "신청하기" 버튼을 클릭하시면 됩니다. 필요 서류는 각 사업별 상세 페이지에서 확인하실 수 있습니다.',
+        '마감': '마감 임박 지원사업은 홈 화면 "마감 임박" 섹션에서 확인하실 수 있습니다. D-day가 표시되어 마감일까지 남은 일수를 쉽게 확인하실 수 있습니다.',
+        '문의': '문의사항은 산업진흥센터 031-289-0000으로 연락주시거나, support@kfi.or.kr로 이메일을 보내주세요. 평일 09:00~18:00에 상담 가능합니다.',
+        '금융': '금융 지원사업으로는 "소방산업체 금융 경비 지원"(HP보증보험료 50%, 연 50만원 한도)과 "지식재산(IP) 금융 지원사업"(IP 대출 2% 이자 지원, 최대 300만원)이 있습니다.',
+        '전시회': '해외전시회 참가 지원사업을 통해 국제 소방전시회 참가비와 부스비를 지원받으실 수 있습니다. 전시회별 공고를 확인해주세요.',
+        '자격': '지원 자격은 사업별로 다릅니다. 일반적으로 통계청 산업특수분류에 의한 소방산업 종사자 및 기업(단체)이 대상입니다. 각 사업 상세페이지에서 정확한 자격요건을 확인해주세요.',
+        '서류': '일반적으로 지원신청서, 사업자등록증, 관련 증빙서류가 필요합니다. 사업별로 필요 서류가 다르니 상세페이지를 확인해주세요.',
+        '안녕': '안녕하세요! KFI 지원사업 챗봇입니다. 지원사업에 대해 궁금한 점이 있으시면 편하게 질문해주세요.',
+        '도움': '다음 키워드로 질문해보세요: 특허, 해외, 신청, 마감, 문의, 금융, 전시회, 자격, 서류'
+      };
+
+      const handleQuickChat = (msg) => {
+        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+        setTimeout(() => {
+          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.';
+          for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+            if (msg.includes(keyword)) { response = answer; break; }
+          }
+          setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+        }, 500);
+      };
+
+      // 프로그램에 D-day 추가
+      const programsWithDday = useMemo(() => {
+        return programs.map(p => ({
+          ...p,
+          dday: calculateDday(p.deadline),
+          isClosed: p.status === 'closed' || (calculateDday(p.deadline) !== null && calculateDday(p.deadline) < 0)
+        }));
+      }, [programs]);
+
+      const filteredPrograms = useMemo(() => {
+        const query = searchQuery.toLowerCase().trim();
+        return programsWithDday.filter(p => {
+          // 검색어가 없으면 카테고리 필터만 적용
+          if (!query) {
+            return selectedCategory === '전체' || p.category === selectedCategory;
+          }
+          // 검색어가 있으면 여러 필드에서 검색
+          const searchFields = [
+            p.title,
+            p.category,
+            p.subcategory,
+            p.description,
+            ...(p.targetTags || [])
+          ].filter(Boolean).join(' ').toLowerCase();
+          
+          const matchesSearch = searchFields.includes(query);
+          const matchesCategory = selectedCategory === '전체' || p.category === selectedCategory;
+          return matchesSearch && matchesCategory;
+        });
+      }, [programsWithDday, searchQuery, selectedCategory]);
+
+      const matchedPrograms = useMemo(() => {
+        if (!userPreferences.targetTags?.length && !userPreferences.subcategories?.length) return [];
+        return programsWithDday.filter(p => {
+          const tagMatch = userPreferences.targetTags?.some(tag => p.targetTags?.includes(tag));
+          const subMatch = userPreferences.subcategories?.some(sub => p.subcategory === sub);
+          return (tagMatch || subMatch) && !p.isClosed;
+        });
+      }, [programsWithDday, userPreferences]);
+
+      const filteredAdminApps = useMemo(() => { 
+        if (adminFilter === '전체') return allApplications; 
+        if (adminFilter === '검토대기') return allApplications.filter(a => a.status === 'submitted'); 
+        if (adminFilter === '심사중') return allApplications.filter(a => a.status === 'reviewing'); 
+        return allApplications.filter(a => ['approved','rejected'].includes(a.status)); 
+      }, [allApplications, adminFilter]);
+      
+      const filteredUserApps = useMemo(() => { 
+        if (statusFilter === '전체') return userApplications; 
+        if (statusFilter === '진행중') return userApplications.filter(a => ['submitted','reviewing'].includes(a.status)); 
+        if (statusFilter === '완료') return userApplications.filter(a => ['approved'].includes(a.status)); 
+        return userApplications.filter(a => a.status === 'rejected'); 
+      }, [userApplications, statusFilter]);
+      
+      const urgentPrograms = programsWithDday.filter(p => p.dday !== null && p.dday >= 0 && p.dday <= 14 && !p.isClosed).sort((a, b) => a.dday - b.dday).slice(0, 5);
+
+      // 로그인 페이지 (일반/관리자 구분)
+      // 프리퍼런스 로컬 복원
+      useEffect(() => {
+        try { const saved = localStorage.getItem('kfi_prefs'); if (saved) setUserPreferences(JSON.parse(saved)); } catch(e) {}
+      }, []);
+
+      // 기기 고유 ID 생성/복원 (UUID)
+      const getOrCreateDeviceId = () => {
+        try {
+          let id = localStorage.getItem('kfi_device_id');
+          if (!id) {
+            id = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('kfi_device_id', id);
+          }
+          return id;
+        } catch(e) { return 'unknown_' + Date.now(); }
+      };
+
+      // ===== 유저 타입 선택 화면 =====
+      const UserTypeSelectPage = () => {
+        const [showAdminForm, setShowAdminForm] = useState(false);
+        const [adminEmail, setAdminEmail] = useState('');
+        const [adminPw, setAdminPw] = useState('');
+        const [adminErr, setAdminErr] = useState('');
+        const [adminLoading, setAdminLoading] = useState(false);
+
+        const handleSelect = async (type) => {
+          setUserType(type);
+          if (firebaseReady) {
+            const deviceId = getOrCreateDeviceId();
+            await window.firebaseAPI.logVisit(type, deviceId);
+          }
+        };
+
+        const handleAdminLogin = async () => {
+          if (!adminEmail || !adminPw) { setAdminErr('이메일과 비밀번호를 입력하세요.'); return; }
+          setAdminLoading(true); setAdminErr('');
+          const r = await window.firebaseAPI.signIn(adminEmail, adminPw);
+          if (!r.success) { setAdminErr('이메일 또는 비밀번호가 틀렸습니다.'); setAdminLoading(false); return; }
+          setAdminLoading(false);
+        };
+
+        return (
+          <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 flex flex-col items-center justify-center p-6 safe-top">
+            <div className="w-full max-w-sm animate-fade-in">
+              {/* 로고 */}
+              <div className="text-center mb-10">
+                <div className="w-24 h-24 bg-white rounded-3xl mx-auto mb-5 flex items-center justify-center shadow-2xl">
+                  <span className="text-slate-800 font-bold text-2xl">KFI</span>
+                </div>
+                <h1 className="text-2xl font-bold text-white mb-1">소방산업 지원사업 비서</h1>
+                <p className="text-slate-400 text-sm">한국소방산업기술원</p>
+              </div>
+
+              {!showAdminForm ? (
+                <>
+                  <p className="text-center text-slate-300 text-sm mb-6">사용자 유형을 선택하세요</p>
+                  <div className="space-y-4">
+                    {/* 일반사용자 */}
+                    <button onClick={() => handleSelect('general')} className="w-full bg-white/10 hover:bg-white/20 active:bg-white/25 border border-white/20 rounded-2xl p-5 text-left transition flex items-center gap-4">
+                      <div className="w-14 h-14 bg-blue-500 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">👤</div>
+                      <div>
+                        <p className="font-bold text-white text-lg">일반사용자</p>
+                      </div>
+                      <Icon name="chevronRight" className="w-5 h-5 text-slate-400 ml-auto" />
+                    </button>
+                    {/* 제조업체 */}
+                    <button onClick={() => handleSelect('manufacturer')} className="w-full bg-white/10 hover:bg-white/20 active:bg-white/25 border border-white/20 rounded-2xl p-5 text-left transition flex items-center gap-4">
+                      <div className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">🏭</div>
+                      <div>
+                        <p className="font-bold text-white text-lg">제조업체</p>
+                      </div>
+                      <Icon name="chevronRight" className="w-5 h-5 text-slate-400 ml-auto" />
+                    </button>
+                  </div>
+                  <button onClick={() => setShowAdminForm(true)} className="w-full mt-6 py-2.5 text-slate-500 text-xs hover:text-slate-400 transition text-center">관리자 로그인</button>
+                </>
+              ) : (
+                <div className="bg-white/10 backdrop-blur rounded-2xl p-6 border border-white/10">
+                  <div className="flex items-center gap-2 mb-5">
+                    <button onClick={() => setShowAdminForm(false)} className="text-slate-400 hover:text-white"><Icon name="chevronLeft" className="w-5 h-5" /></button>
+                    <h2 className="text-white font-bold">관리자 로그인</h2>
+                  </div>
+                  {adminErr && <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-4 text-sm text-red-200">{adminErr}</div>}
+                  <div className="space-y-3">
+                    <input type="text" placeholder="이메일" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
+                    <input type="password" placeholder="비밀번호" value={adminPw} onChange={e => setAdminPw(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAdminLogin()} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <button onClick={handleAdminLogin} disabled={adminLoading} className="w-full mt-4 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition disabled:opacity-50">
+                    {adminLoading ? '로그인 중...' : '관리자 로그인'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      };
+
+
+      // 이미지 스타일 카드 컴포넌트 (3열 그리드용)
+      const ProgramCard = ({ program, viewMode = 'list' }) => { 
+        const dday = program.dday;
+        const isClosed = program.isClosed;
+        const statusBadge = getStatusBadge(program.status, dday);
+        
+        // 상태 텍스트
+        const getStatusText = () => {
+          if (isClosed) return '마감';
+          if (program.status === 'always') return '상시';
+          return '접수중';
+        };
+        
+        const getStatusClass = () => {
+          if (isClosed) return 'bg-gray-100 text-gray-500';
+          if (program.status === 'always') return 'bg-blue-100 text-blue-600';
+          return 'bg-green-100 text-green-600';
+        };
+
+        // 그리드 뷰 카드 - 화이트 카드 (개선11)
+        if (viewMode === 'grid') {
+          const catColor = program.category === '국내사업' ? 'bg-blue-500' : program.category === '해외사업' ? 'bg-emerald-500' : 'bg-indigo-500';
+          return (
+            <div className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-md transition cursor-pointer ${isClosed ? 'opacity-60' : ''}`} onClick={() => setSelectedProgram(program)}>
+              {/* 컬러 상단 바 */}
+              <div className={`h-1.5 w-full ${catColor}`} />
+              <div className="p-4">
+                {/* 배지 행 */}
+                <div className="flex items-center justify-between mb-3">
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold text-white ${catColor}`}>{program.subcategory || program.category}</span>
+                  <div className="flex items-center gap-2">
+                    {dday !== null && <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${getDdayColor(dday)}`}>{getDdayText(dday)}</span>}
+                    <button onClick={(e) => toggleBookmark(program.id || program.docId, e)} className="text-slate-300 hover:text-amber-400">
+                      <Icon name={bookmarks.includes(program.id || program.docId) ? "starFilled" : "star"} className={`w-4 h-4 ${bookmarks.includes(program.id || program.docId) ? 'text-amber-400' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+                {/* 제목 */}
+                <h3 className="font-bold text-slate-900 text-sm leading-tight line-clamp-2 mb-3">{program.title}</h3>
+                {/* 정보 */}
+                <div className="space-y-1.5 mb-3">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <Icon name="dollarSign" className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                    <span className="font-medium text-slate-700 line-clamp-1">{program.amount}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <Icon name="calendar" className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="line-clamp-1">{program.deadline === '상시' ? '연중 상시' : program.deadline}</span>
+                  </div>
+                </div>
+                {/* 상태 + 버튼 */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-50">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getStatusClass()}`}>{getStatusText()}</span>
+                  <span className="text-xs text-blue-600 font-semibold">상세보기 →</span>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // 기존 리스트 뷰 카드
+        return (
+          <div className={`bg-white rounded-2xl p-5 shadow-sm hover:shadow-md transition cursor-pointer border border-slate-100 ${isClosed ? 'opacity-60' : ''}`} onClick={() => setSelectedProgram(program)}>
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex gap-2 flex-wrap">
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadge.class}`}>{statusBadge.text}</span>
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getCategoryColor(program.category)}`}>{program.category}</span>
+              </div>
+              <button onClick={(e) => toggleBookmark(program.id || program.docId, e)} className="text-slate-300 hover:text-amber-400">
+                <Icon name={bookmarks.includes(program.id || program.docId) ? "starFilled" : "star"} className={`w-5 h-5 ${bookmarks.includes(program.id || program.docId) ? 'text-amber-400' : ''}`} />
+              </button>
+            </div>
+            <h3 className="font-bold text-slate-900 mb-3 line-clamp-2">{program.title}</h3>
+            <div className="flex flex-wrap gap-3 text-sm text-slate-500">
+              <div className="flex items-center gap-1.5"><Icon name="dollarSign" className="w-4 h-4" /><span className="font-medium text-slate-700">{program.amount}</span></div>
+              {dday !== null && <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getDdayColor(dday)}`}>{getDdayText(dday)}</span>}
+            </div>
+          </div>
+        );
+      };
+
+      const Header = () => {
+        const inputRef = React.useRef(null);
+        const timerRef = React.useRef(null);
+
+        // clearSearch 시 입력값 초기화
+        React.useEffect(() => {
+          if (!searchQuery && inputRef.current) {
+            inputRef.current.value = '';
+          }
+        }, [searchQuery]);
+
+        const handleChange = () => {}; // 타이핑 중 검색 없음
+
+        const handleSearch = () => {
+          if (inputRef.current) setSearchQuery(inputRef.current.value.trim());
+        };
+
+        const handleClear = () => {
+          if (inputRef.current) inputRef.current.value = '';
+          setSearchQuery('');
+          setSearchBarKey(k => k + 1);
+        };
+
+        return (
+          <header className="bg-gradient-to-r from-slate-800 to-slate-700 text-white sticky top-0 z-50 safe-top">
+            <div className="px-4 py-4">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center"><span className="text-slate-800 font-bold text-lg">KFI</span></div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="font-bold">소방산업 지원사업 비서</h1>
+                      {isAdmin && <span className="text-[10px] bg-red-500 px-1.5 py-0.5 rounded font-bold">ADMIN</span>}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-300">
+                      <LiveBadge />
+                      <span>{userType === 'manufacturer' ? '🏭 제조업체' : userType === 'admin' ? '관리자' : '👤 일반사용자'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button className="relative w-10 h-10 bg-white/10 rounded-full flex items-center justify-center" onClick={() => setShowNotifications(!showNotifications)}>
+                    <Icon name="bell" />
+                    {notifications.length > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{notifications.length}</span>}
+                  </button>
+                  <button className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center" onClick={handleLogout}><Icon name="logOut" /></button>
+                </div>
+              </div>
+              {!isAdmin && (
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                      <Icon name="search" className="w-5 h-5" />
+                    </div>
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      enterKeyHint="search"
+                      placeholder="검색어를 입력하세요"
+                      defaultValue=""
+                      onChange={handleChange}
+                      onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button type="button" onClick={handleClear}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                      <Icon name="x" className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button type="button" onClick={handleSearch}
+                    className="px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 rounded-xl text-white flex-shrink-0">
+                    <Icon name="search" className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </header>
+        );
+      };
+
+      // 알림 패널 (개선: 개별 닫기, 전체닫기)
+      const NotificationPanel = () => {
+        if (!showNotifications) return null;
+        return (
+          <div className="fixed inset-0 z-50" onClick={() => setShowNotifications(false)}>
+            <div className="absolute right-4 top-20 w-80 max-h-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold flex items-center gap-2">🔔 알림
+                  {notifications.length > 0 && <span className="text-xs bg-red-500 px-2 py-0.5 rounded-full">{notifications.length}건</span>}
+                </h3>
+                {notifications.length > 0 && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); notifications.forEach(n => dismissNotification(n.id)); }} className="text-xs text-slate-300 hover:text-white underline">전체 지우기</button>
+                )}
+              </div>
+              <div className="max-h-[300px] overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400">
+                    <div className="text-3xl mb-2">🔕</div>
+                    <p className="text-sm">새 알림이 없습니다.</p>
+                  </div>
+                ) : (
+                  notifications.map(notif => (
+                    <div key={notif.id} className="p-4 border-b border-slate-100 hover:bg-slate-50 flex items-start gap-3 cursor-pointer" onClick={() => {
+                      const program = programsWithDday.find(p => p.id === notif.programId);
+                      if (program) setSelectedProgram(program);
+                      setShowNotifications(false);
+                    }}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0 ${notif.type === 'deadline' ? 'bg-red-500' : 'bg-blue-500'}`}>
+                        {notif.type === 'deadline' ? '⏰' : '🆕'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-slate-900">{notif.title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{notif.message}</p>
+                      </div>
+                      <button type="button" onClick={(e) => dismissNotification(notif.id, e)} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-slate-600 flex-shrink-0 rounded-full hover:bg-slate-100">
+                        <Icon name="x" className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const BottomNav = () => (
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-40 shadow-lg">
+          <div className="flex justify-around py-1 pb-5 safe-bottom max-w-lg mx-auto">
+            {[
+              { id: 'home', icon: 'home', label: '지원사업' },
+
+              { id: 'calendar', icon: 'calendar', label: '일정' },
+              { id: 'mypage', icon: 'user', label: '마이' }
+            ].map(item => {
+              const active = currentPage === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setCurrentPage(item.id)}
+                  className={`relative flex flex-col items-center gap-0.5 min-w-[60px] py-2 rounded-lg transition-colors ${active ? 'text-blue-600' : 'text-slate-400 active:bg-slate-100'}`}
+                >
+                  {active && <span className="nav-indicator" />}
+                  <div className={`p-1.5 rounded-xl transition-all ${active ? 'bg-blue-50 scale-110' : ''}`}>
+                    <Icon name={item.icon} className="w-5 h-5" />
+                  </div>
+                  <span className={`text-[10px] font-semibold ${active ? 'text-blue-600' : ''}`}>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      );
+
+      // 맞춤형 지원사업 설정 모달
+      const PreferencesModal = () => {
+        const [localPrefs, setLocalPrefs] = useState(userPreferences);
+        const hasAnimated = React.useRef(false);
+        
+        useEffect(() => {
+          if (showPreferences) {
+            setLocalPrefs(userPreferences);
+            hasAnimated.current = false;
+            // 다음 렌더링 후 애니메이션 완료 표시
+            const timer = setTimeout(() => { hasAnimated.current = true; }, 350);
+            return () => clearTimeout(timer);
+          }
+        }, [showPreferences]);
+        
+        if (!showPreferences) return null;
+        
+        const targetTagOptions = [
+          { value: '소방산업체', label: '소방산업체' },
+          { value: '제조업체', label: '제조업체' },
+          { value: '신규업체', label: '신규업체' },
+          { value: '특허보유', label: '특허보유 기업' },
+          { value: '수출희망', label: '수출희망 기업' },
+          { value: '수출실적', label: '수출실적 보유' },
+          { value: '설계업', label: '설계업' },
+          { value: '시공업', label: '시공업' },
+          { value: '감리업', label: '감리업' },
+          { value: '점검업', label: '점검업' },
+        ];
+
+        const subcategoryOptions = [
+          { value: '특허', label: '특허 지원' },
+          { value: '금융', label: '금융 지원' },
+          { value: '경비', label: '경비 지원' },
+          { value: '포상', label: '포상' },
+          { value: '전시회', label: '해외 전시회' },
+          { value: '인증', label: '해외 인증' },
+          { value: '마케팅', label: '수출 마케팅' },
+          { value: '교육', label: '교육' },
+        ];
+
+        const toggleTag = (tag) => {
+          setLocalPrefs(prev => ({
+            ...prev,
+            targetTags: prev.targetTags?.includes(tag) 
+              ? prev.targetTags.filter(t => t !== tag)
+              : [...(prev.targetTags || []), tag]
+          }));
+        };
+
+        const toggleSub = (sub) => {
+          setLocalPrefs(prev => ({
+            ...prev,
+            subcategories: prev.subcategories?.includes(sub)
+              ? prev.subcategories.filter(s => s !== sub)
+              : [...(prev.subcategories || []), sub]
+          }));
+        };
+        
+        const handleSave = async () => {
+          setUserPreferences(localPrefs);
+          if (currentUser && !window._testUser) {
+            await window.firebaseAPI.updateUserProfile(currentUser.uid, { preferences: localPrefs });
+          }
+          setShowPreferences(false);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setShowPreferences(false)}>
+            <div 
+              className="bg-white w-full max-h-[85vh] rounded-t-3xl overflow-hidden animate-slide-up"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-5 border-b flex justify-between items-center">
+                <h2 className="text-lg font-bold flex items-center gap-2"><Icon name="target" className="w-5 h-5 text-blue-600" /> 맞춤형 지원사업 설정</h2>
+                <button type="button" onClick={() => setShowPreferences(false)}><Icon name="x" className="w-5 h-5" /></button>
+              </div>
+              <div className="p-5 overflow-y-auto max-h-[60vh]">
+                <div className="mb-6">
+                  <h3 className="font-bold text-slate-900 mb-3">지원자격 (복수 선택 가능)</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {targetTagOptions.map(opt => (
+                      <button type="button" key={opt.value} onClick={() => toggleTag(opt.value)} className={`px-4 py-2 rounded-full text-sm font-medium ${localPrefs.targetTags?.includes(opt.value) ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 mb-3">관심 분야 (복수 선택 가능)</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {subcategoryOptions.map(opt => (
+                      <button type="button" key={opt.value} onClick={() => toggleSub(opt.value)} className={`px-4 py-2 rounded-full text-sm font-medium ${localPrefs.subcategories?.includes(opt.value) ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 border-t">
+                <button type="button" onClick={handleSave} className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold">설정 저장</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // 스켈레톤 카드 (개선17)
+      const SkeletonCard = () => (
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100">
+          <div className="skeleton h-1.5 w-full" />
+          <div className="p-4 space-y-3">
+            <div className="skeleton h-5 w-20 rounded-full" />
+            <div className="skeleton h-4 w-full rounded" />
+            <div className="skeleton h-4 w-3/4 rounded" />
+            <div className="skeleton h-3 w-1/2 rounded" />
+          </div>
+        </div>
+      );
+
+      const SectionHeader = ({ emoji, title, badge, action, actionLabel }) => (
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{emoji}</span>
+            <h2 className="text-base font-bold text-slate-900">{title}</h2>
+            {badge}
+          </div>
+          {action && <button type="button" onClick={action} className="text-sm text-blue-600 font-semibold">{actionLabel || '전체보기 →'}</button>}
+        </div>
+      );
+
+      const HomePage = () => {
+        const [viewMode, setViewMode] = useState('grid');
+        return (
+        <div className="pb-24 animate-fade-in">
+          {/* 바로가기 버튼 */}
+          <div className="px-4 pt-3">
+            <div className="grid grid-cols-1 gap-2">
+              <a href="https://kfi.or.kr" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 rounded-xl py-2.5 px-3 transition">
+                <Icon name="externalLink" className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                <span className="text-xs font-medium text-slate-700">기술원 바로가기</span>
+              </a>
+            </div>
+          </div>
+
+          {/* 마감 임박 */}
+          {urgentPrograms.length > 0 && (
+            <section className="px-4 mt-4">
+              <div className="bg-red-50 rounded-2xl p-4 border border-red-100">
+                <SectionHeader emoji="🔥" title="마감 임박" badge={<LiveBadge />} />
+                <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 hide-scrollbar">
+                  {urgentPrograms.map(p => (
+                    <div key={p.id || p.docId} onClick={() => setSelectedProgram(p)} className={`min-w-[220px] bg-white rounded-2xl p-4 shadow-sm cursor-pointer border-l-4 ${p.dday <= 3 ? 'border-red-500' : 'border-amber-500'}`}>
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-bold mb-2 ${getDdayColor(p.dday)}`}>{getDdayText(p.dday)}</span>
+                      <h3 className="font-bold text-slate-900 mb-1 line-clamp-2 text-sm">{p.title}</h3>
+                      <p className="text-xs text-slate-500">{p.amount}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 카테고리 필터 + 뷰 토글 */}
+          <div className="px-4 py-3 sticky top-[104px] bg-slate-100 z-40">
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex gap-2 overflow-x-auto hide-scrollbar flex-1">
+                {['전체', '국내사업', '해외사업', '정보제공'].map(cat => (
+                  <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition ${selectedCategory === cat ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>{cat}</button>
+                ))}
+              </div>
+              <div className="flex gap-1 ml-2 bg-white rounded-lg p-1 flex-shrink-0">
+                <button type="button" onClick={() => setViewMode('grid')} className={`p-2 rounded ${viewMode === 'grid' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                </button>
+                <button type="button" onClick={() => setViewMode('list')} className={`p-2 rounded ${viewMode === 'list' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/></svg>
+                </button>
+              </div>
+            </div>
+            {searchQuery ? (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-600"><span className="font-semibold text-blue-600">"{searchQuery}"</span> 검색결과 <span className="font-bold text-slate-900 ml-1">{filteredPrograms.length}건</span></p>
+                <button type="button" onClick={clearSearch} className="flex items-center gap-1 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-xs font-medium text-slate-600">
+                  <Icon name="x" className="w-3 h-3" />초기화
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">총 {filteredPrograms.length}개의 지원사업</p>
+            )}
+          </div>
+
+          {/* 지원사업 목록 */}
+          <div className="px-4">
+            {programsLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {[1,2,3,4].map(i => <SkeletonCard key={i} />)}
+              </div>
+            ) : filteredPrograms.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="text-5xl mb-4">🔍</div>
+                <p className="text-slate-600 font-medium mb-2">검색 결과가 없습니다</p>
+                <p className="text-sm text-slate-400 mb-4">다른 키워드로 검색해 보세요</p>
+                <button type="button" onClick={() => { clearSearch(); setSelectedCategory('전체'); }} className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium">전체 목록 보기</button>
+              </div>
+            ) : viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {filteredPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="grid" />)}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="list" />)}
+              </div>
+            )}
+          </div>
+        </div>
+        );
+      };
+
+
+      // 신청현황 (Pull to Refresh)
+      const StatusPage = () => {
+        const [pullY, setPullY] = useState(0);
+        const THRESHOLD = 80;
+
+        const handleTouchStart = (e) => { window._touchStartY = e.touches[0].clientY; };
+        const handleTouchMove = (e) => {
+          if (!window._touchStartY) return;
+          const delta = e.touches[0].clientY - window._touchStartY;
+          if (delta > 0) setPullY(Math.min(delta, THRESHOLD + 20));
+        };
+        const handleTouchEnd = async () => {
+          if (pullY >= THRESHOLD && !refreshing) { await handleRefresh(); }
+          setPullY(0);
+          window._touchStartY = null;
+        };
+        const pullProgress = Math.min(pullY / THRESHOLD, 1);
+
+        return (
+          <div className="pb-24 px-4 py-4 animate-fade-in" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+            {/* 당기기 인디케이터 (개선5) */}
+            <div className="flex justify-center overflow-hidden transition-all" style={{ height: pullY > 0 ? pullY * 0.6 : 0 }}>
+              <div className={`flex items-center gap-2 text-sm transition-all ${pullProgress >= 1 ? 'text-blue-600' : 'text-slate-400'}`} style={{ opacity: pullProgress }}>
+                <div className={`w-5 h-5 border-2 rounded-full transition-all ${pullProgress >= 1 ? 'border-blue-500 border-t-transparent animate-spin' : 'border-slate-300'}`} />
+                {pullProgress >= 1 ? '놓으면 새로고침' : '당겨서 새로고침'}
+              </div>
+            </div>
+            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">📝 신청 현황 <LiveBadge /></h2>
+            <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar">
+              {['전체', '진행중', '완료', '반려'].map(f => (
+                <button key={f} onClick={() => setStatusFilter(f)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${statusFilter === f ? 'bg-slate-800 text-white' : 'bg-white'}`}>{f}</button>
+              ))}
+            </div>
+            <div className="space-y-3">
+              {filteredUserApps.length === 0 ? (
+                <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
+                  <div className="text-5xl mb-4">📋</div>
+                  <p className="font-semibold text-slate-700 mb-1">신청 내역이 없습니다</p>
+                  <p className="text-sm text-slate-400 mb-5">지원사업을 찾아 신청해보세요</p>
+                  <button onClick={() => setCurrentPage('home')} className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-semibold">지원사업 둘러보기 →</button>
+                </div>
+              ) : (
+                filteredUserApps.map(app => (
+                  <div key={app.docId} className="bg-white rounded-2xl p-5 shadow-sm">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
+                    <h3 className="font-bold my-3">{app.programTitle}</h3>
+                    <p className="text-sm text-slate-500">신청일: {app.createdAt ? new Date(app.createdAt).toLocaleDateString('ko-KR') : '-'}</p>
+                    {app.reviewNote && <p className="text-sm text-red-500 mt-2">💬 {app.reviewNote}</p>}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      };
+
+      // ===== 관리자 대시보드 =====
+      // ===== 사업 순서 변경 컴포넌트 =====
+      const ProgramOrderList = ({ programs, onEdit, onDelete }) => {
+        const [localPrograms, setLocalPrograms] = useState([...programs]);
+        const [orderChanged, setOrderChanged] = useState(false);
+        const [saving, setSaving] = useState(false);
+
+        useEffect(() => {
+          setLocalPrograms([...programs]);
+          setOrderChanged(false);
+        }, [programs]);
+
+        const move = (idx, dir) => {
+          const next = [...localPrograms];
+          const target = idx + dir;
+          if (target < 0 || target >= next.length) return;
+          [next[idx], next[target]] = [next[target], next[idx]];
+          setLocalPrograms(next);
+          setOrderChanged(true);
+        };
+
+        const saveOrder = async () => {
+          setSaving(true);
+          const result = await window.firebaseAPI.updateProgramOrders(localPrograms);
+          setSaving(false);
+          if (result.success) setOrderChanged(false);
+          else alert('저장 실패. 다시 시도해주세요.');
+        };
+
+        return (
+          <>
+            {orderChanged ? (
+              <div className="flex gap-2 mb-3">
+                <button type="button" onClick={saveOrder} disabled={saving}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">
+                  {saving ? '저장 중...' : '✅ 순서 저장'}
+                </button>
+                <button type="button" onClick={() => { setLocalPrograms([...programs]); setOrderChanged(false); }}
+                  className="px-4 py-2.5 bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl">
+                  취소
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 mb-3">▲▼ 버튼으로 순서를 변경한 뒤 저장하세요.</p>
+            )}
+            <div className="space-y-2">
+              {localPrograms.map((p, idx) => (
+                <div key={p.docId||p.id} className="bg-white rounded-xl p-4 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <div className="flex flex-col gap-1 flex-shrink-0 pt-0.5">
+                      <button type="button" onClick={() => move(idx, -1)} disabled={idx === 0}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg text-slate-600 disabled:opacity-20 text-xs font-bold">▲</button>
+                      <button type="button" onClick={() => move(idx, 1)} disabled={idx === localPrograms.length - 1}
+                        className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded-lg text-slate-600 disabled:opacity-20 text-xs font-bold">▼</button>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm">{p.title}</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getCategoryColor(p.category)}`}>{p.category}</span>
+                        {p.subcategory && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{p.subcategory}</span>}
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${getStatusBadge(p.status).class}`}>{getStatusBadge(p.status).text}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">{p.openDate ? `공고: ${p.openDate} ~ ` : ""}{p.deadline} · {p.amount}</p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button type="button" onClick={() => onEdit(p)} className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold">수정</button>
+                      <button type="button" onClick={() => onDelete(p)} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-semibold">삭제</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        );
+      };
+
+      const ExhibitionEditForm = ({ initial, onSave, onCancel }) => {
+        const [name, setName] = useState(initial?.name || '');
+        const [location, setLocation] = useState(initial?.location || '');
+        const [country, setCountry] = useState(initial?.country || '');
+        const [startDate, setStartDate] = useState(initial?.startDate || '');
+        const [endDate, setEndDate] = useState(initial?.endDate || '');
+        const [color, setColor] = useState(initial?.color || 'from-slate-600 to-slate-400');
+        const [saving, setSaving] = useState(false);
+        const ic = 'w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400';
+        const colorOptions = [
+          { label: '청록', value: 'from-teal-600 to-teal-400' },
+          { label: '보라', value: 'from-purple-600 to-purple-400' },
+          { label: '빨강', value: 'from-red-600 to-red-400' },
+          { label: '파랑', value: 'from-blue-600 to-blue-400' },
+          { label: '초록', value: 'from-emerald-600 to-emerald-400' },
+          { label: '남색', value: 'from-indigo-600 to-indigo-400' },
+        ];
+        const handleSave = async () => {
+          if (!name.trim() || !startDate) { alert('전시회명과 시작일은 필수입니다.'); return; }
+          setSaving(true);
+          await onSave({ name, location, country, startDate, endDate, color });
+          setSaving(false);
+        };
+        return (
+          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4">
+            <h4 className="font-bold mb-3">{initial ? '✏️ 전시회 수정' : '➕ 전시회 추가'}</h4>
+            <div className="space-y-2">
+              <input placeholder="전시회명 *" value={name} onChange={e=>setName(e.target.value)} className={ic} />
+              <input placeholder="국기 이모지 (예: 🇺🇸)" value={country} onChange={e=>setCountry(e.target.value)} className={ic} />
+              <input placeholder="장소 (예: 미국 시카고)" value={location} onChange={e=>setLocation(e.target.value)} className={ic} />
+              <div className="flex gap-2">
+                <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className={ic + ' flex-1'} />
+                <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className={ic + ' flex-1'} />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-1">카드 색상</p>
+                <div className="flex gap-2 flex-wrap">
+                  {colorOptions.map(c => (
+                    <button type="button" key={c.value} onClick={() => setColor(c.value)} className={`px-3 py-1 rounded-full text-xs font-semibold text-white bg-gradient-to-r ${c.value} ${color === c.value ? 'ring-2 ring-offset-1 ring-slate-800' : ''}`}>{c.label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button type="button" onClick={onCancel} className="flex-1 py-2 rounded-xl bg-slate-100 text-sm font-semibold">취소</button>
+              <button type="button" onClick={handleSave} disabled={saving} className="flex-1 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-50">{saving ? '저장중...' : '저장'}</button>
+            </div>
+          </div>
+        );
+      };
+
+      const AdminDashboard = () => {
+        const totalVisits = visitStats.reduce((s,d) => s+(d.total||0), 0);
+        const totalUnique = visitStats.reduce((s,d) => s+(d.unique||0), 0);
+        const todayStats = visitStats[0] || {};
+
+        const handleSaveExhibition = async (data) => {
+          let result;
+          if (editExhibition) {
+            result = await window.firebaseAPI.updateExhibition(editExhibition.docId || String(editExhibition.id), data);
+          } else {
+            result = await window.firebaseAPI.addExhibition(data);
+          }
+          if (result.success) { setShowExhibitionForm(false); setEditExhibition(null); }
+          else alert('저장 실패. 다시 시도해주세요.');
+        };
+
+        const handleDeleteExhibition = async (ex) => {
+          if (!confirm(`"${ex.name}" 전시회를 삭제하시겠습니까?`)) return;
+          await window.firebaseAPI.deleteExhibition(ex.docId || String(ex.id));
+        };
+
+        return (
+          <div className="pb-24 animate-fade-in">
+            <div className="flex bg-white border-b overflow-x-auto">
+              {[{id:'dashboard',label:'📊 대시보드'},{id:'programs',label:'📝 사업관리'},{id:'exhibitions',label:'🌏 전시회'}].map(t => (
+                <button key={t.id} onClick={() => setAdminTab(t.id)} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition whitespace-nowrap px-3 ${adminTab===t.id ? 'border-slate-800 text-slate-900' : 'border-transparent text-slate-400'}`}>{t.label}</button>
+              ))}
+            </div>
+
+            {adminTab === 'dashboard' && (
+              <div className="px-4 py-5">
+
+                {/* HTML 내보내기 */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm mb-5">
+                  <p className="font-bold text-sm mb-1">📦 HTML 내보내기</p>
+                  <p className="text-xs text-slate-400 mb-3">Firestore의 최신 사업 데이터를 index.html에 반영하여 다운로드합니다. GitHub 업로드용으로 사용하세요.</p>
+                  <button type="button"
+                    onClick={async () => {
+                      const btn = document.getElementById('exportBtn');
+                      btn.disabled = true;
+                      btn.textContent = '⏳ 생성 중...';
+                      try {
+                        // 1. Firestore에서 최신 programs 가져오기
+                        const snapshot = await window.firebaseAPI.db.collection('programs').orderBy('id').get();
+                        const latestPrograms = [];
+                        snapshot.forEach(doc => latestPrograms.push({ ...doc.data() }));
+                        if (latestPrograms.length === 0) { alert('Firestore에 데이터가 없습니다.'); return; }
+
+                        // 2. 현재 HTML을 DOM에서 직접 읽기 (fetch 불필요)
+                        let html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+
+                        // 3. defaultPrograms 배열 교체
+                        const newData = JSON.stringify(latestPrograms, null, 2);
+                        html = html.replace(
+                          /const defaultPrograms = \[[\s\S]*?\](\s*\n\s*const defaultExhibitions)/,
+                          `const defaultPrograms = ${newData}$1`
+                        );
+
+                        // 4. 버전 날짜 업데이트
+                        const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
+                        html = html.replace(
+                          /const CURRENT_VERSION = '[^']*'/,
+                          `const CURRENT_VERSION = '${today}-export'`
+                        );
+
+                        // 5. 다운로드
+                        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `index_${today}.html`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        btn.textContent = '✅ 완료!';
+                        setTimeout(() => { btn.disabled = false; btn.textContent = '⬇️ HTML 내보내기'; }, 2000);
+                      } catch(e) {
+                        console.error(e);
+                        alert('내보내기 실패: ' + e.message);
+                        btn.disabled = false;
+                        btn.textContent = '⬇️ HTML 내보내기';
+                      }
+                    }}
+                    id="exportBtn"
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white text-sm font-semibold rounded-xl transition disabled:opacity-50">
+                    ⬇️ HTML 내보내기
+                  </button>
+                </div>
+
+                {/* 알림 설정 */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm mb-5 flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-sm">🔔 사용자 알림</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{notificationsEnabled ? '마감 임박·신규 알림 활성화됨' : '알림이 꺼져있습니다'}</p>
+                  </div>
+                  <button type="button" onClick={() => toggleNotificationsEnabled(!notificationsEnabled)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${notificationsEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${notificationsEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div className="bg-blue-50 p-4 rounded-2xl shadow-sm border border-blue-100">
+                    <p className="text-xs text-blue-600 mb-1">📈 누적 방문</p>
+                    <p className="text-2xl font-bold text-blue-700">{totalVisits.toLocaleString()}회</p>
+                    <p className="text-xs text-blue-400">순 방문자 {totalUnique}명</p>
+                  </div>
+                  <div className="bg-emerald-50 p-4 rounded-2xl shadow-sm border border-emerald-100">
+                    <p className="text-xs text-emerald-600 mb-1">📅 오늘 방문</p>
+                    <p className="text-2xl font-bold text-emerald-700">{todayStats.total||0}회</p>
+                    <p className="text-xs text-slate-500">순 {todayStats.unique||0}명 · 일반 {todayStats.general||0} · 제조 {todayStats.manufacturer||0}</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-5 shadow-sm mb-4">
+                  <h3 className="font-bold mb-4">📈 최근 방문 현황</h3>
+                  {visitStats.length === 0 ? (
+                    <p className="text-center py-4 text-slate-400 text-sm">방문 데이터가 없습니다.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {visitStats.slice(0,7).map(d => (
+                        <div key={d.id} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 w-20 flex-shrink-0">{d.date}</span>
+                          <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden relative">
+                            <div className="h-full bg-blue-500 rounded-full" style={{width:`${Math.min((d.total||0)/Math.max(...visitStats.map(s=>s.total||1))*100,100)}%`}} />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-700">{d.total||0}회</span>
+                          </div>
+                          <span className="text-xs text-slate-400 w-14 text-right flex-shrink-0">순 {d.unique||0}명</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {adminTab === 'programs' && (
+              <div className="px-4 py-5">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold">지원사업 관리 ({programs.length}개)</h3>
+                  <button onClick={() => { setEditProg(null); setShowProgramForm(true); }} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-xl">+ 추가</button>
+                </div>
+                {showProgramForm && (
+                  <ProgramEditForm
+                    key={editProg ? (editProg.docId || editProg.id) : 'new'}
+                    initial={editProg}
+                    onSave={handleSaveProgram}
+                    onCancel={handleCancelProgramForm}
+                  />
+                )}
+                {!showProgramForm && (
+                  <ProgramOrderList
+                    programs={programs}
+                    onEdit={handleEditProg}
+                    onDelete={handleDeleteProg}
+                  />
+                )}
+              </div>
+            )}
+
+            {adminTab === 'exhibitions' && (
+              <div className="px-4 py-5">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold">해외전시회 관리 ({(exhibitions.length > 0 ? exhibitions : window.defaultExhibitions).length}개)</h3>
+                  <button onClick={() => { setEditExhibition(null); setShowExhibitionForm(true); }} className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-xl">+ 추가</button>
+                </div>
+                {showExhibitionForm && (
+                  <ExhibitionEditForm
+                    key={editExhibition ? (editExhibition.docId || editExhibition.id) : 'new-ex'}
+                    initial={editExhibition}
+                    onSave={handleSaveExhibition}
+                    onCancel={() => { setShowExhibitionForm(false); setEditExhibition(null); }}
+                  />
+                )}
+                <div className="space-y-3">
+                  {(exhibitions.length > 0 ? exhibitions : window.defaultExhibitions).map(ex => (
+                    <div key={ex.docId||ex.id} className={`bg-gradient-to-r ${ex.color || 'from-slate-600 to-slate-400'} rounded-2xl p-4 text-white`}>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-sm text-white/80">{ex.startDate} ~ {ex.endDate?.slice(5) || ex.endDate}</p>
+                          <h3 className="font-bold mt-0.5">{ex.country} {ex.name}</h3>
+                          <p className="text-sm text-white/90 flex items-center gap-1 mt-0.5"><Icon name="mapPin" className="w-3 h-3" />{ex.location}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => { setEditExhibition(ex); setShowExhibitionForm(true); }} className="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold">수정</button>
+                          <button type="button" onClick={() => handleDeleteExhibition(ex)} className="px-2.5 py-1 bg-red-500/70 hover:bg-red-500 rounded-lg text-xs font-semibold">삭제</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const AdminStatusPage = () => (
+        <div className="pb-24 px-4 py-4 animate-fade-in">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">📑 접수 관리 <LiveBadge /></h2>
+          <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar">
+            {['전체', '검토대기', '심사중', '완료'].map(f => (
+              <button key={f} onClick={() => setAdminFilter(f)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${adminFilter === f ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                {f} ({f === '전체' ? allApplications.length : f === '검토대기' ? allApplications.filter(a => a.status === 'submitted').length : f === '심사중' ? allApplications.filter(a => a.status === 'reviewing').length : allApplications.filter(a => ['approved','rejected'].includes(a.status)).length})
+              </button>
+            ))}
+          </div>
+          <div className="space-y-3">
+            {filteredAdminApps.length === 0 ? (
+              <div className="bg-white rounded-2xl p-8 text-center text-slate-400">신청 내역이 없습니다.</div>
+            ) : (
+              filteredAdminApps.map(app => (
+                <div key={app.docId} className="bg-white rounded-2xl p-4 shadow-sm">
+                  <div className="flex justify-between mb-2">
+                    <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded">{app.userCompany}</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
+                  </div>
+                  <h3 className="font-bold text-sm mb-2">{app.programTitle}</h3>
+                  <p className="text-xs text-slate-400 mb-2">{app.userName} · {app.userEmail}</p>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-400">{app.createdAt ? new Date(app.createdAt).toLocaleDateString('ko-KR') : '-'}</span>
+                    <button type="button" onClick={() => setReviewModal(app)} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg">심사</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+
+      const CalendarPage = () => {
+        const [calView, setCalView] = useState('deadline'); // 'deadline' | 'exhibition'
+        const deadlinePrograms = useMemo(() => programsWithDday.filter(p => p.dday !== null && p.dday >= 0 && p.dday <= 60 && !p.isClosed).sort((a,b) => a.dday - b.dday), [programsWithDday]);
+        return (
+          <div className="pb-24 px-4 py-4 animate-fade-in">
+            {/* 탭 */}
+            <div className="flex bg-white rounded-xl p-1 mb-5 shadow-sm">
+              <button onClick={() => setCalView('deadline')} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${calView === 'deadline' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>📅 마감일정</button>
+              <button onClick={() => setCalView('exhibition')} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${calView === 'exhibition' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>🌏 해외전시회</button>
+            </div>
+
+            {calView === 'deadline' ? (
+              <div className="space-y-3">
+                <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">📌 마감 D-60 이내 <LiveBadge /></h2>
+                {deadlinePrograms.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
+                    <div className="text-4xl mb-3">🗓️</div>
+                    <p className="font-semibold text-slate-700 mb-1">60일 내 마감 사업 없음</p>
+                    <p className="text-sm text-slate-400">현재 접수 중인 사업을 확인해보세요</p>
+                  </div>
+                ) : deadlinePrograms.map(p => (
+                  <div key={p.id || p.docId} onClick={() => setSelectedProgram(p)} className={`bg-white rounded-2xl p-4 shadow-sm cursor-pointer flex items-center gap-4 border-l-4 ${p.dday <= 7 ? 'border-red-400' : p.dday <= 14 ? 'border-amber-400' : 'border-blue-300'}`}>
+                    <div className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${p.dday <= 7 ? 'bg-red-50' : p.dday <= 14 ? 'bg-amber-50' : 'bg-blue-50'}`}>
+                      <span className={`text-xs font-bold ${p.dday <= 7 ? 'text-red-500' : p.dday <= 14 ? 'text-amber-500' : 'text-blue-500'}`}>D-</span>
+                      <span className={`text-lg font-black leading-none ${p.dday <= 7 ? 'text-red-600' : p.dday <= 14 ? 'text-amber-600' : 'text-blue-600'}`}>{p.dday === 0 ? 'Day' : p.dday}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-900 text-sm line-clamp-2">{p.title}</p>
+                      <p className="text-xs text-slate-500 mt-1">마감: {p.deadline}</p>
+                      <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-bold ${getCategoryColor(p.category)}`}>{p.category}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <h2 className="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">🌍 해외전시회 일정 <LiveBadge /></h2>
+                {(exhibitions.length > 0 ? exhibitions : defaultExhibitions).map(ex => (
+                  <div key={ex.id || ex.docId} className={`bg-gradient-to-r ${ex.color || 'from-slate-600 to-slate-400'} rounded-2xl p-5 text-white`}>
+                    <p className="text-sm text-white/80 mb-1">{ex.startDate} ~ {ex.endDate?.slice(5)}</p>
+                    <h3 className="text-lg font-bold mb-1">{ex.country} {ex.name}</h3>
+                    <p className="text-sm text-white/90 flex items-center gap-1"><Icon name="mapPin" className="w-4 h-4" /> {ex.location}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const MyPage = () => (
+        <div className="pb-24 px-4 py-4 animate-fade-in">
+          <div className="bg-white rounded-2xl p-6 text-center mb-6 shadow-sm">
+            <div className="w-20 h-20 bg-gradient-to-r from-slate-800 to-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl text-white">
+              {isAdmin ? <Icon name="settings" className="w-10 h-10"/> : userType === 'manufacturer' ? '🏭' : '👤'}
+            </div>
+            <h2 className="text-xl font-bold">{isAdmin ? '관리자' : userType === 'manufacturer' ? '제조업체' : '일반사용자'}</h2>
+            {isAdmin && currentUser && <p className="text-sm text-slate-400 mt-1">{currentUser.email}</p>}
+          </div>
+          <button onClick={handleLogout} className="w-full py-3 bg-red-50 text-red-500 font-semibold rounded-2xl border border-red-100">로그아웃</button>
+        </div>
+      );
+
+      const DetailModal = () => { 
+        if (!selectedProgram) return null;
+        const dday = selectedProgram.dday;
+        const isClosed = selectedProgram.isClosed;
+        const statusBadge = getStatusBadge(selectedProgram.status, dday);
+        const isBookmarked = bookmarks.includes(selectedProgram.id || selectedProgram.docId);
+        
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setSelectedProgram(null)}>
+            <div className="bg-white w-full max-h-[90vh] rounded-t-3xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
+              <div className="p-5 border-b">
+                <div className="w-10 h-1 bg-slate-300 rounded-full mx-auto mb-4" />
+                <div className="flex justify-between items-start">
+                  <div className="flex gap-2 mb-2 flex-wrap flex-1">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${statusBadge.class}`}>{statusBadge.text}</span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getCategoryColor(selectedProgram.category)}`}>{selectedProgram.category}</span>
+                    {dday !== null && <span className={`px-3 py-1 rounded-full text-xs font-bold ${getDdayColor(dday)}`}>{getDdayText(dday)}</span>}
+                  </div>
+                  {/* 북마크 버튼 (개선12) */}
+                  <button onClick={(e) => toggleBookmark(selectedProgram.id || selectedProgram.docId, e)} className={`p-2 rounded-full transition ${isBookmarked ? 'bg-amber-50' : 'hover:bg-slate-100'}`}>
+                    <Icon name={isBookmarked ? "starFilled" : "star"} className={`w-6 h-6 ${isBookmarked ? 'text-amber-400' : 'text-slate-400'}`} />
+                  </button>
+                </div>
+                <h2 className="text-xl font-bold">{selectedProgram.title}</h2>
+              </div>
+              <div className="p-5 overflow-y-auto max-h-[55vh]">
+                <p className="text-slate-600 mb-4 leading-relaxed">{selectedProgram.description}</p>
+                
+                <div className="bg-blue-50 rounded-xl p-4 mb-4">
+                  <p className="text-sm font-semibold text-blue-800 mb-1">지원대상</p>
+                  <p className="text-sm text-blue-700">{selectedProgram.target}</p>
+                </div>
+                
+                <div className="bg-slate-50 rounded-xl p-4 mb-4">
+                  <p className="text-sm font-semibold text-slate-500 mb-2">지원금액</p>
+                  <p className="font-bold text-lg text-slate-900 mb-2">{selectedProgram.amount}</p>
+                  {selectedProgram.details?.map((d, i) => (
+                    <div key={i} className="flex justify-between text-sm py-1 border-b border-slate-200 last:border-0">
+                      <span className="text-slate-500">{d.item}</span>
+                      <span className="font-medium">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="bg-slate-50 rounded-xl p-4 mb-4">
+                  <p className="text-sm font-semibold text-slate-500 mb-1">접수마감</p>
+                  <p className="font-bold">{selectedProgram.deadline}</p>
+                </div>
+                
+                {selectedProgram.documents?.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-sm font-semibold text-slate-500 mb-2">제출서류</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedProgram.documents.map((doc, i) => (
+                        <span key={i} className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-sm">{doc}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {selectedProgram.contact && (
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-slate-500 mb-2">문의처</p>
+                    <p className="text-sm">{selectedProgram.contact.dept} · {selectedProgram.contact.phone}</p>
+                    <p className="text-sm text-slate-500">{selectedProgram.contact.email}</p>
+                  </div>
+                )}
+              </div>
+              <div className="p-4 border-t flex gap-3 safe-bottom">
+                <button type="button" onClick={() => setSelectedProgram(null)} className="flex-1 py-4 rounded-xl font-semibold bg-slate-100">닫기</button>
+                {isClosed ? (
+                  <button disabled className="flex-1 py-4 rounded-xl font-semibold bg-gray-300 text-gray-500">마감됨</button>
+                ) : (
+                  <button onClick={() => {
+                    const url = selectedProgram.applyUrl || 'https://www.kfi.or.kr';
+                    window.open(url, '_blank');
+                  }} className="flex-1 py-4 rounded-xl font-semibold text-white bg-slate-800">
+                    신청하기
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ReviewModal = () => { 
+        if (!reviewModal) return null; 
+        const [note, setNote] = useState(''); 
+        const [loading, setLoading] = useState(false); 
+        
+        const handleAction = async (status, step) => { 
+          if (status === 'rejected' && !note.trim()) { alert('반려 사유를 입력해주세요.'); return; } 
+          setLoading(true); 
+          await window.firebaseAPI.updateApplicationStatus(reviewModal.docId, status, step, note); 
+          setLoading(false); 
+          setReviewModal(null); 
+          alert(status === 'approved' ? '승인되었습니다.' : status === 'rejected' ? '반려되었습니다.' : '상태가 변경되었습니다.');
+        }; 
+        
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setReviewModal(null)}>
+            <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-800 text-white p-5"><h2 className="text-lg font-bold">신청서 심사</h2><p className="text-sm text-slate-300">{reviewModal.userCompany}</p></div>
+              <div className="p-5">
+                <p className="font-medium mb-2">{reviewModal.programTitle}</p>
+                <p className="text-sm text-slate-500 mb-4">{reviewModal.userName} · {reviewModal.userEmail}</p>
+                <textarea className="w-full border rounded-xl p-3 text-sm" rows="3" placeholder="심사 의견" value={note} onChange={e => setNote(e.target.value)} />
+              </div>
+              <div className="flex gap-3 p-4 border-t">
+                <button type="button" onClick={() => handleAction('rejected', 2)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-red-100 text-red-600">반려</button>
+                <button type="button" onClick={() => handleAction('reviewing', 2)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-amber-100 text-amber-600">심사중</button>
+                <button type="button" onClick={() => handleAction('approved', 3)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-emerald-600 text-white">승인</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const MyPageModal = () => { 
+        if (!activeModal) return null;
+        
+        const APP_VERSION = "1.1.0";
+        const patchNotes = [
+          {
+            version: "1.1.0",
+            date: "2025.01.16",
+            changes: [
+              { type: "improve", text: "모바일 사용성 전면 개선" },
+              { type: "improve", text: "검색 UI 개선 (검색 버튼 강조, 결과 표시 개선)" },
+              { type: "improve", text: "검색 결과 없을 때 안내 메시지 추가" },
+              { type: "improve", text: "하단 네비게이션 디자인 개선" },
+              { type: "improve", text: "챗봇 입력창 및 버튼 디자인 개선" },
+              { type: "improve", text: "버튼 터치 피드백 추가" },
+              { type: "fix", text: "입력 필드 자동 확대 방지" },
+            ]
+          },
+          {
+            version: "1.0.7",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "모바일 키보드 드롭 현상 해결" },
+              { type: "new", text: "검색 버튼 추가 (모바일 사용성 개선)" },
+              { type: "new", text: "검색어 초기화 기능 추가" },
+              { type: "improve", text: "한글 입력 중 엔터키 오동작 방지" },
+            ]
+          },
+          {
+            version: "1.0.6",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창/챗봇 입력 시 키보드 드롭 현상 완전 해결" },
+              { type: "improve", text: "입력 방식 개선 (엔터키로 검색/전송)" },
+              { type: "improve", text: "지원사업 통합 검색 기능 (제목, 카테고리, 태그)" },
+            ]
+          },
+          {
+            version: "1.0.5",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창/챗봇 입력 시 키보드가 닫히는 오류 수정" },
+              { type: "improve", text: "지원사업 검색 기능 개선 (제목, 카테고리, 태그 등 통합 검색)" },
+            ]
+          },
+          {
+            version: "1.0.4",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "입력 관련 안정성 개선" },
+            ]
+          },
+          {
+            version: "1.0.3",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "챗봇 질문 버튼 클릭 시 화면 깜빡임 현상 수정" },
+              { type: "improve", text: "챗봇 모달 애니메이션 안정성 개선" },
+            ]
+          },
+          {
+            version: "1.0.2",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "맞춤지원사업 설정 버튼 클릭 시 깜빡임 현상 수정" },
+              { type: "fix", text: "챗봇 모달 내 버튼 깜빡임 현상 수정" },
+              { type: "improve", text: "전체 모달 애니메이션 안정성 개선" },
+            ]
+          },
+          {
+            version: "1.0.1",
+            date: "2025.01.16",
+            changes: [
+              { type: "fix", text: "검색창 한글 입력 시 한 글자씩 끊기는 오류 수정" },
+              { type: "improve", text: "한글 조합 중 검색 안정성 개선" },
+            ]
+          },
+          {
+            version: "1.0.0",
+            date: "2025.01.16",
+            changes: [
+              { type: "new", text: "KFI 지원사업 비서 앱 정식 출시" },
+              { type: "new", text: "맞춤형 지원사업 추천 기능" },
+              { type: "new", text: "AI 챗봇 상담 기능" },
+              { type: "new", text: "지원사업 즐겨찾기 기능" },
+              { type: "new", text: "신청 현황 실시간 확인" },
+            ]
+          },
+        ];
+        
+        const getChangeIcon = (type) => {
+          switch(type) {
+            case 'new': return { icon: 'sparkles', color: 'text-emerald-500', bg: 'bg-emerald-50', label: '새 기능' };
+            case 'improve': return { icon: 'wrench', color: 'text-blue-500', bg: 'bg-blue-50', label: '개선' };
+            case 'fix': return { icon: 'bug', color: 'text-amber-500', bg: 'bg-amber-50', label: '버그 수정' };
+            default: return { icon: 'info', color: 'text-slate-500', bg: 'bg-slate-50', label: '기타' };
+          }
+        };
+        
+        const content = { 
+          profile: (
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">이름</p><p className="font-semibold">{userProfile?.name}</p></div>
+              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">회사</p><p className="font-semibold">{userProfile?.company}</p></div>
+              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">이메일</p><p className="font-semibold">{currentUser?.email}</p></div>
+              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">연락처</p><p className="font-semibold">{userProfile?.phone || '미등록'}</p></div>
+            </div>
+          ), 
+          bookmark: (
+            <div className="space-y-3">
+              {bookmarks.length === 0 ? <p className="text-center py-8 text-slate-400">즐겨찾기가 없습니다.</p> : 
+                programsWithDday.filter(p => bookmarks.includes(p.id || p.docId)).map(p => (
+                  <div key={p.id || p.docId} className="bg-slate-50 rounded-xl p-4 flex justify-between items-center">
+                    <div className="flex-1 mr-3">
+                      <p className="font-medium text-sm line-clamp-1">{p.title}</p>
+                      <p className="text-xs text-slate-500">{p.category}</p>
+                    </div>
+                    <button onClick={() => toggleBookmark(p.id || p.docId)} className="text-amber-400"><Icon name="starFilled" className="w-5 h-5" /></button>
+                  </div>
+                ))
+              }
+            </div>
+          ), 
+          help: (
+            <div className="space-y-4">
+              <div className="bg-blue-50 rounded-xl p-4"><p className="font-semibold">📞 전화문의</p><p className="text-lg font-bold text-blue-600">031-289-0000</p><p className="text-xs text-slate-500 mt-1">평일 09:00~18:00</p></div>
+              <div className="bg-slate-50 rounded-xl p-4"><p className="font-semibold">📧 이메일</p><p>support@kfi.or.kr</p></div>
+              <a href="https://kfi.or.kr" target="_blank" rel="noopener noreferrer" className="block bg-slate-800 text-white rounded-xl p-4 text-center font-semibold">기술원 홈페이지 바로가기</a>
+            </div>
+          ),
+          version: (
+            <div className="space-y-6">
+              {/* 현재 버전 정보 */}
+              <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-2xl p-5 text-white text-center">
+                <p className="text-xs text-slate-300 mb-1">현재 버전</p>
+                <p className="text-3xl font-bold">v{APP_VERSION}</p>
+                <p className="text-xs text-slate-400 mt-2">최신 버전입니다</p>
+              </div>
+              
+              {/* 패치노트 목록 */}
+              <div>
+                <h3 className="font-bold text-slate-900 mb-3">📋 업데이트 내역</h3>
+                <div className="space-y-4">
+                  {patchNotes.map((note, idx) => (
+                    <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                        <span className="font-bold text-slate-800">v{note.version}</span>
+                        <span className="text-xs text-slate-500">{note.date}</span>
+                      </div>
+                      <div className="p-4 space-y-2">
+                        {note.changes.map((change, cidx) => {
+                          const style = getChangeIcon(change.type);
+                          return (
+                            <div key={cidx} className="flex items-start gap-3">
+                              <div className={`w-6 h-6 rounded-full ${style.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                                <Icon name={style.icon} className={`w-3.5 h-3.5 ${style.color}`} />
+                              </div>
+                              <p className="text-sm text-slate-700 leading-relaxed">{change.text}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* 앱 정보 */}
+              <div className="text-center text-xs text-slate-400 pt-4 border-t border-slate-100">
+                <p>KFI 지원사업 비서</p>
+                <p className="mt-1">© 2025 한국소방산업기술원</p>
+              </div>
+            </div>
+          )
+        }; 
+        const titles = { profile: '내 정보', bookmark: '즐겨찾기', help: '문의하기', version: '버전 정보' }; 
+        
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setActiveModal(null)}>
+            <div className="bg-white w-full max-h-[70vh] rounded-t-3xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
+              <div className="p-5 border-b flex justify-between items-center"><h2 className="text-lg font-bold">{titles[activeModal]}</h2><button type="button" onClick={() => setActiveModal(null)} className="p-2"><Icon name="x" className="w-5 h-5" /></button></div>
+              <div className="p-5 overflow-y-auto max-h-[50vh]">{content[activeModal]}</div>
+            </div>
+          </div>
+        );
+      };
+
+      // 스플래시 화면
+      const SplashScreen = () => (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center" style={{ background: 'linear-gradient(180deg, #1e3a5f 0%, #2d4a6f 50%, #3d5a7f 100%)' }}>
+          {/* KFI 로고 */}
+          <div className="mb-8">
+            <div className="w-20 h-20 rounded-full border-2 border-white/80 flex items-center justify-center">
+              <span className="text-white text-2xl font-bold tracking-wider">KFI</span>
+            </div>
+          </div>
+          
+          {/* 메인 타이틀 */}
+          <h1 className="text-white text-4xl font-bold mb-2">KFI</h1>
+          <h2 className="text-white text-3xl font-bold mb-4">지원사업 비서</h2>
+          <p className="text-white/80 text-lg mb-16">소방산업의 미래를 함께 합니다</p>
+          
+          {/* 아이콘 영역 */}
+          <div className="relative w-48 h-48 mb-16">
+            {/* 파란 톱니바퀴 - 왼쪽 하단 */}
+            <svg className="absolute left-0 bottom-0 w-20 h-20 text-blue-500 opacity-80 animate-spin-slow" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+            </svg>
+            
+            {/* 불꽃 - 중앙 */}
+            <svg className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28" viewBox="0 0 24 24">
+              <path fill="#ef4444" d="M12 23c-3.9 0-7-3.1-7-7 0-2.8 1.6-5.2 3.1-6.8.5-.5 1.4-.2 1.4.5v1.5c0 .6.4 1 1 1s1-.4 1-1V3c0-.6.5-1 1-1s1 .4 1 1v5c0 .6.4 1 1 1s1-.4 1-1V7c0-.7.9-1 1.4-.5C18.4 8.8 19 11.2 19 14c0 3.9-3.1 7-7 7z"/>
+              <path fill="#fbbf24" d="M12 21c-2.2 0-4-1.8-4-4 0-1.6.9-3 1.8-3.9.3-.3.8-.1.8.3v.9c0 .3.2.6.6.6.3 0 .6-.2.6-.6V9c0-.3.3-.6.6-.6s.6.2.6.6v2.9c0 .3.2.6.6.6.3 0 .6-.2.6-.6v-1.5c0-.4.5-.6.8-.3.9.9 1.4 2.3 1.4 3.9 0 2.2-1.8 4-4 4z"/>
+            </svg>
+            
+            {/* 회색 톱니바퀴 - 오른쪽 */}
+            <svg className="absolute right-0 top-4 w-16 h-16 text-slate-400 opacity-70" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z"/>
+            </svg>
+          </div>
+          
+          {/* 시작하기 버튼 */}
+          <button type="button" onClick={() => setShowSplash(false)} className="flex items-center gap-2 text-white text-lg font-medium animate-pulse">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
+            시작하기
+          </button>
+        </div>
+      );
+
+      // 챗봇 모달
+      const ChatbotModal = () => {
+        const chatContainerRef = React.useRef(null);
+        const modalRef = React.useRef(null);
+        const hasAnimated = React.useRef(false);
+        
+        useEffect(() => {
+          // 애니메이션 완료 후 클래스 제거
+          if (showChatbot && modalRef.current && !hasAnimated.current) {
+            const timer = setTimeout(() => {
+              if (modalRef.current) {
+                modalRef.current.style.animation = 'none';
+                modalRef.current.style.transform = 'translateY(0)';
+                modalRef.current.style.opacity = '1';
+              }
+              hasAnimated.current = true;
+            }, 350);
+            return () => clearTimeout(timer);
+          }
+        }, [showChatbot]);
+        
+        useEffect(() => {
+          // 모달이 닫힐 때 애니메이션 상태 리셋
+          if (!showChatbot) {
+            hasAnimated.current = false;
+          }
+        }, [showChatbot]);
+        
+        useEffect(() => {
+          // 부모 컨테이너 내에서만 스크롤 (setTimeout으로 DOM 업데이트 후 실행)
+          if (chatContainerRef.current) {
+            setTimeout(() => {
+              if (chatContainerRef.current) {
+                chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+              }
+            }, 10);
+          }
+        }, [chatMessages]);
+        
+        if (!showChatbot) return null;
+
+        const handleQuickQuestion = (q) => {
+          setChatMessages(prev => [...prev, { role: 'user', text: q }]);
+          setTimeout(() => {
+            let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.';
+            for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+              if (q.includes(keyword)) { response = answer; break; }
+            }
+            setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+          }, 500);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setShowChatbot(false)}>
+            <div 
+              ref={modalRef}
+              className="bg-white w-full max-w-lg h-[70vh] rounded-t-3xl overflow-hidden flex flex-col animate-slide-up"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* 헤더 */}
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                    <Icon name="messageCircle" className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="font-bold">KFI 지원사업 챗봇</h2>
+                    <p className="text-xs text-blue-100">무엇이든 물어보세요</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowChatbot(false)} className="p-2"><Icon name="x" className="w-5 h-5" /></button>
+              </div>
+              
+              {/* 메시지 영역 */}
+              <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'}`}>
+                      <p className="text-sm leading-relaxed">{msg.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* 빠른 질문 버튼 */}
+              <div className="px-4 py-3 bg-slate-50 border-t flex gap-2 overflow-x-auto hide-scrollbar">
+                {['특허 지원', '해외 진출', '신청 방법', '문의처'].map(q => (
+                  <button type="button" key={q} onClick={() => handleQuickQuestion(q)} className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 active:bg-slate-200 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap transition-colors shadow-sm">{q}</button>
+                ))}
+              </div>
+              
+              {/* 입력 영역 */}
+              <div className="p-3 bg-white border-t flex gap-2 items-end">
+                <input 
+                  id="chatInputField"
+                  type="text"
+                  enterKeyHint="send"
+                  defaultValue=""
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      const input = e.target;
+                      const msg = input.value.trim();
+                      if (msg) {
+                        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+                        input.value = '';
+                        setTimeout(() => {
+                          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
+                          for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+                            if (msg.includes(keyword)) { response = answer; break; }
+                          }
+                          setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+                        }, 500);
+                      }
+                    }
+                  }}
+                  placeholder="질문을 입력하세요..." 
+                  className="flex-1 px-4 py-3 bg-slate-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border-0"
+                />
+                <button type="button" onClick={() => {
+                  const input = document.getElementById('chatInputField');
+                  const msg = input?.value?.trim();
+                  if (msg) {
+                    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
+                    input.value = '';
+                    setTimeout(() => {
+                      let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
+                      for (const [keyword, answer] of Object.entries(chatbotResponses)) {
+                        if (msg.includes(keyword)) { response = answer; break; }
+                      }
+                      setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
+                    }, 500);
+                  }
+                }} className="w-11 h-11 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-full flex items-center justify-center transition-colors shadow-md">
+                  <Icon name="send" className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // 챗봇 FAB 버튼
+      const ChatbotFAB = () => (
+        <button 
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowChatbot(true); }} 
+          className="fixed right-4 bottom-28 w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-all hover:shadow-2xl"
+          style={{ boxShadow: '0 4px 20px rgba(79, 70, 229, 0.4)' }}
+        >
+          <Icon name="messageCircle" className="w-7 h-7" />
+        </button>
+      );
+
+      // 스플래시 화면 표시
+      if (showSplash) return <SplashScreen />;
+
+      if (!userType) return <UserTypeSelectPage />;
+
+      return (
+        <div className="min-h-screen bg-slate-100">
+          <Header />
+          <NotificationPanel />
+          <main>
+            {currentPage === 'home' && (isAdmin ? <AdminDashboard /> : <HomePage />)}
+            {currentPage === 'calendar' && <CalendarPage />}
+            {currentPage === 'mypage' && <MyPage />}
+          </main>
+          <BottomNav />
+          <ChatbotFAB />
+          <DetailModal />
+          <MyPageModal />
+          <ReviewModal />
+          <PreferencesModal />
+          <ChatbotModal />
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
