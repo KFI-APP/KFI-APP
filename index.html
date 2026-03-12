@@ -24,7 +24,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260312-002'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260312-004'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -92,7 +92,7 @@
       name: "KFI 지원사업 비서",
       short_name: "KFI 비서",
       description: "한국소방산업기술원 소방산업 지원사업 신청 시스템",
-      start_url: "./",
+      start_url: "https://kfi-app.github.io/KFI-APP/",
       display: "standalone",
       background_color: "#1d408b",
       theme_color: "#1d408b",
@@ -117,13 +117,15 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
   <script>
+    // ⚠️ 아래 값을 새 Firebase 프로젝트의 설정값으로 교체하세요
+    // Firebase 콘솔 → 프로젝트 설정(⚙️) → 내 앱 → SDK 설정 및 구성에서 복사
     const firebaseConfig = {
-      apiKey: "AIzaSyCHJcVV4gaHKAA8YeJJ56zEoREXqCizrW4",
-      authDomain: "test-kfi.firebaseapp.com",
-      projectId: "test-kfi",
-      storageBucket: "test-kfi.firebasestorage.app",
-      messagingSenderId: "30541110364",
-      appId: "1:30541110364:web:d6be094c192e146d891a99"
+      apiKey: "AIzaSyCOM1guoD91fewFMDE0yeGKwWEhonMFEqs",
+      authDomain: "kfi-app-5fa02.firebaseapp.com",
+      projectId: "kfi-app-5fa02",
+      storageBucket: "kfi-app-5fa02.firebasestorage.app",
+      messagingSenderId: "1002669146842",
+      appId: "1:1002669146842:web:18926ec94cd2794846dbe3"
     };
 
     firebase.initializeApp(firebaseConfig);
