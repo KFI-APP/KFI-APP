@@ -23,7 +23,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260313-006'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260313-007'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -850,19 +850,20 @@
       },
 
       subscribePrograms: (callback) => {
-        const q = db.collection("programs").orderBy("sortOrder").orderBy("id");
+        // sortOrder+id 복합 인덱스 없이 동작하도록 id 단일 orderBy + 클라이언트 정렬
+        const q = db.collection("programs").orderBy("id");
         return q.onSnapshot((snapshot) => {
           const programs = [];
           snapshot.forEach((doc) => programs.push({ docId: doc.id, ...doc.data() }));
+          // sortOrder가 있는 경우 클라이언트에서 재정렬
+          programs.sort((a, b) => {
+            if (a.sortOrder !== undefined && b.sortOrder !== undefined) return a.sortOrder - b.sortOrder;
+            if (a.sortOrder !== undefined) return -1;
+            if (b.sortOrder !== undefined) return 1;
+            return (a.id || 0) - (b.id || 0);
+          });
           callback(programs.length > 0 ? programs : window.defaultPrograms || []);
-        }, (error) => {
-          // sortOrder 인덱스 없으면 id 순으로 폴백
-          db.collection("programs").orderBy("id").get().then(snap => {
-            const programs = [];
-            snap.forEach(doc => programs.push({ docId: doc.id, ...doc.data() }));
-            callback(programs.length > 0 ? programs : window.defaultPrograms || []);
-          }).catch(() => callback(window.defaultPrograms || []));
-        });
+        }, () => callback(window.defaultPrograms || []));
       },
 
       subscribeExhibitions: (callback) => {
@@ -5309,12 +5310,19 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
           if (editProg) {
             const docId = editProg.docId || String(editProg.id);
             const result = await window.firebaseAPI.updateProgram(docId, data);
-            if (result.success) { alert('수정되었습니다.'); }
-            else { alert('수정 중 오류가 발생했습니다.'); return; }
+            if (result.success) {
+              // 낙관적 즉시 반영
+              setPrograms(prev => prev.map(p =>
+                (p.docId || String(p.id)) === docId ? { ...p, ...data, docId } : p
+              ));
+              showToast('수정되었습니다', '✅');
+            } else { alert('수정 중 오류가 발생했습니다.'); return; }
           } else {
             const result = await window.firebaseAPI.addProgram(data);
-            if (result.success) { alert('새 사업이 추가되었습니다.'); }
-            else { alert('추가 중 오류가 발생했습니다.'); return; }
+            if (result.success) {
+              // 신규는 리스너가 받아오므로 toast만
+              showToast('새 사업이 추가되었습니다', '✅');
+            } else { alert('추가 중 오류가 발생했습니다.'); return; }
           }
           setShowProgramForm(false);
           setEditProg(null);
@@ -6033,8 +6041,10 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
           setSaving(true);
           const result = await window.firebaseAPI.updateProgramOrders(localPrograms);
           setSaving(false);
-          if (result.success) setOrderChanged(false);
-          else alert('저장 실패. 다시 시도해주세요.');
+          if (result.success) {
+            setOrderChanged(false);
+            if (onReorder) onReorder(localPrograms); // 즉시 반영
+          } else alert('저장 실패. 다시 시도해주세요.');
         };
 
         return (
@@ -6305,6 +6315,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
                     programs={programs}
                     onEdit={handleEditProg}
                     onDelete={handleDeleteProg}
+                    onReorder={(reordered) => setPrograms(reordered)}
                   />
                 )}
               </div>
