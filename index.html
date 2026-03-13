@@ -23,7 +23,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260313-004'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260313-005'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -888,45 +888,56 @@
 
       // 방문 로그 기록
       logVisit: async (userType, deviceId) => {
-        try {
-          const today = new Date().toISOString().slice(0, 10);
-          const statRef = db.collection("visitStats").doc(today);
-          const statSnap = await statRef.get();
-          let isUniqueToday = true;
-          if (statSnap.exists) {
-            const devices = statSnap.data().devices || [];
-            isUniqueToday = !devices.includes(deviceId);
-          }
+        const today = new Date().toISOString().slice(0, 10);
+        const statRef = db.collection("visitStats").doc(today);
 
+        // visitStats 읽기 권한이 없을 수 있으므로 방어 처리
+        let statSnap = null;
+        let existingData = null;
+        try {
+          statSnap = await statRef.get();
+          if (statSnap.exists) existingData = statSnap.data();
+        } catch(e) {
+          // 읽기 권한 없음 — 쓰기는 계속 진행
+        }
+
+        const devices = existingData?.devices || [];
+        const isUniqueToday = !devices.includes(deviceId);
+
+        // visits 컬렉션에 개별 기록
+        try {
           await db.collection("visits").add({
             userType, deviceId,
             visitedAt: new Date().toISOString(),
             date: today,
             isUnique: isUniqueToday
           });
+        } catch(e) { console.warn('[KFI] visits write 실패:', e); }
 
-          if (statSnap.exists) {
-            const d = statSnap.data();
+        // visitStats 집계 업데이트
+        try {
+          if (existingData) {
             const updateData = {
-              total: (d.total || 0) + 1,
-              [userType]: (d[userType] || 0) + 1,
+              total: (existingData.total || 0) + 1,
+              [userType]: (existingData[userType] || 0) + 1,
               updatedAt: new Date().toISOString()
             };
             if (isUniqueToday) {
-              updateData.unique = (d.unique || 0) + 1;
-              updateData[`unique_${userType}`] = (d[`unique_${userType}`] || 0) + 1;
-              updateData.devices = [...(d.devices || []), deviceId];
+              updateData.unique = (existingData.unique || 0) + 1;
+              updateData[`unique_${userType}`] = (existingData[`unique_${userType}`] || 0) + 1;
+              updateData.devices = [...devices, deviceId];
             }
             await statRef.update(updateData);
           } else {
+            // 오늘 첫 방문이거나 읽기 실패 → set으로 시도 (merge: true로 충돌 방지)
             await statRef.set({
-              date: today, total: 1, unique: 1,
-              [userType]: 1, [`unique_${userType}`]: 1,
-              devices: [deviceId],
+              date: today, total: 1, unique: isUniqueToday ? 1 : 0,
+              [userType]: 1,
+              ...(isUniqueToday ? { [`unique_${userType}`]: 1, devices: [deviceId] } : {}),
               updatedAt: new Date().toISOString()
-            });
+            }, { merge: true });
           }
-        } catch(e) {}
+        } catch(e) { console.warn('[KFI] visitStats write 실패:', e); }
       },
 
       subscribeVisitStats: (callback) => {
@@ -5188,8 +5199,9 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
       useEffect(() => {
         if (!firebaseReady || !userType || userType === 'admin') return;
         const deviceId = getOrCreateDeviceId();
-        window.firebaseAPI.logVisit(userType, deviceId);
-      }, [firebaseReady]); // firebaseReady가 true가 될 때 한 번만 실행
+        window.firebaseAPI.logVisit(userType, deviceId)
+          .catch(e => console.warn('[KFI] logVisit 실패 — Firebase 보안 규칙 확인 필요:', e));
+      }, [firebaseReady, userType]); // userType 변경(첫 선택)도 반영
 
       // 관리자 Firebase 인증 상태
       useEffect(() => {
@@ -5614,7 +5626,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <LiveBadge />
-                      <span className="text-[11px] text-slate-400">{userType === 'manufacturer' ? '🏭 제조업체' : '👤 일반사용자'}</span>
+                      <span className="text-[11px] text-slate-400">{isAdmin ? '⚙️ 관리자' : userType === 'manufacturer' ? '🏭 제조업체' : '👤 일반사용자'}</span>
                     </div>
                   </div>
                 </div>
@@ -6384,7 +6396,8 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
             {!isAdmin && <p className="text-xs text-slate-400 mt-1">북마크 {bookmarkedPrograms.length}개 저장됨</p>}
           </div>
 
-          {/* 북마크 목록 */}
+          {/* 북마크 목록 — 일반/제조업체만 표시 */}
+          {!isAdmin && (
           <div className="mb-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">⭐ 저장한 지원사업 <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{bookmarkedPrograms.length}</span></h3>
@@ -6426,6 +6439,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
               </div>
             )}
           </div>
+          )}
 
           <button onClick={handleLogout} className="w-full py-3 bg-red-50 text-red-500 font-semibold rounded-2xl border border-red-100">로그아웃</button>
         </div>
