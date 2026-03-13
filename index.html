@@ -24,7 +24,7 @@
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260312-004'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260313-002'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -486,19 +486,6 @@
     window.firebaseAPI = {
       auth, db,
       
-      signUp: async (email, password, userData) => {
-        try {
-          const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-          const user = userCredential.user;
-          await db.collection("users").doc(user.uid).set({
-            ...userData, email, uid: user.uid, bookmarks: [], preferences: {},
-            createdAt: new Date().toISOString(),
-            isAdmin: email === 'admin@kfi.or.kr'
-          });
-          return { success: true, user };
-        } catch (error) { return { success: false, error: error.code }; }
-      },
-
       signIn: async (email, password) => {
         try {
           const userCredential = await auth.signInWithEmailAndPassword(email, password);
@@ -506,14 +493,7 @@
         } catch (error) { return { success: false, error: error.code }; }
       },
 
-      signOut: async () => { try { await auth.signOut(); window._testUser = null; window._testUserData = null; window._isTestAdmin = null; return { success: true }; } catch (error) { return { success: false }; } },
-      
-      setTestUser: (testUser, testUserData, isAdmin) => {
-        window._testUser = testUser;
-        window._testUserData = testUserData;
-        window._isTestAdmin = isAdmin;
-        window.dispatchEvent(new CustomEvent('testUserLogin'));
-      },
+      signOut: async () => { try { await auth.signOut(); return { success: true }; } catch (error) { return { success: false }; } },
       
       onAuthChange: (callback) => auth.onAuthStateChanged(callback),
 
@@ -574,40 +554,6 @@
             callback(programs.length > 0 ? programs : window.defaultPrograms || []);
           }).catch(() => callback(window.defaultPrograms || []));
         });
-      },
-
-      submitApplication: async (application) => {
-        try {
-          const docRef = await db.collection("applications").add({
-            ...application, status: "submitted", step: 1,
-            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-          });
-          return { success: true, id: docRef.id };
-        } catch (error) { 
-          console.error("Application error:", error);
-          return { success: false, error: error.message }; 
-        }
-      },
-
-      subscribeUserApplications: (uid, callback) => {
-        const q = db.collection("applications").where("userId", "==", uid).orderBy("createdAt", "desc");
-        return q.onSnapshot((snapshot) => {
-          const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
-        });
-      },
-
-      subscribeAllApplications: (callback) => {
-        const q = db.collection("applications").orderBy("createdAt", "desc");
-        return q.onSnapshot((snapshot) => {
-          const apps = []; snapshot.forEach((doc) => apps.push({ docId: doc.id, ...doc.data() })); callback(apps);
-        });
-      },
-
-      updateApplicationStatus: async (docId, status, step, note = '') => {
-        try {
-          await db.collection("applications").doc(docId).update({ status, step, reviewNote: note, updatedAt: new Date().toISOString() });
-          return { success: true };
-        } catch (error) { return { success: false }; }
       },
 
       subscribeExhibitions: (callback) => {
@@ -712,31 +658,6 @@
           await db.collection("programs").doc(docId).delete();
           return { success: true };
         } catch(e) { return { success: false }; }
-      },
-
-      addNotification: async (notification) => {
-        try {
-          await db.collection("notifications").add({
-            ...notification,
-            createdAt: new Date().toISOString(),
-            read: false
-          });
-          return { success: true };
-        } catch (error) { return { success: false }; }
-      },
-
-      subscribeNotifications: (uid, callback) => {
-        const q = db.collection("notifications").where("userId", "==", uid).orderBy("createdAt", "desc");
-        return q.onSnapshot((snapshot) => {
-          const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
-        }, () => callback([]));
-      },
-
-      subscribeAllNotifications: (callback) => {
-        const q = db.collection("notifications").orderBy("createdAt", "desc");
-        return q.onSnapshot((snapshot) => {
-          const notifs = []; snapshot.forEach((doc) => notifs.push({ docId: doc.id, ...doc.data() })); callback(notifs);
-        }, () => callback([]));
       },
 
       updateExhibition: async (docId, data) => {
@@ -856,21 +777,9 @@
         refresh: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="m3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
         target: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
         messageCircle: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>,
-        info: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
-        sparkles: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M3 5h4"/><path d="M19 17v4"/><path d="M17 19h4"/></svg>,
-        wrench: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>,
-        bug: <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>,
       };
       return icons[name] || null;
     };
-
-    const LoadingSpinner = ({ text = "로딩중..." }) => (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
-        <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mb-6 shadow-2xl"><span className="text-slate-800 font-bold text-2xl">KFI</span></div>
-        <div className="w-8 h-8 border-4 border-slate-600 border-t-white rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-400">{text}</p>
-      </div>
-    );
 
     const LiveBadge = () => (<span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full live-badge"><span className="w-1.5 h-1.5 bg-white rounded-full"></span>LIVE</span>);
 
@@ -908,65 +817,6 @@
       }; 
       return colors[category] || "bg-gray-50 text-gray-700"; 
     };
-    const getFirebaseErrorMessage = (errorCode) => { 
-      const messages = { 
-        'auth/email-already-in-use': '이미 사용중인 이메일입니다.', 
-        'auth/invalid-email': '유효하지 않은 이메일입니다.', 
-        'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.', 
-        'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.' 
-      }; 
-      return messages[errorCode] || '오류가 발생했습니다.'; 
-    };
-
-    // === 검색 입력 컴포넌트 (로컬 state와 부모 state 완전 분리 - 타이핑 버그 방지) ===
-    const AppSearchBar = ({ onQueryChange, resetKey }) => {
-      const [val, setVal] = React.useState('');
-
-      // 초기화(resetKey 변경) 시에만 val 리셋
-      React.useEffect(() => {
-        setVal('');
-        onQueryChange('');
-      }, [resetKey]);
-
-      // val 변경 시 300ms 디바운스로 부모 업데이트 (타이핑 중 리렌더 차단)
-      React.useEffect(() => {
-        const timer = setTimeout(() => {
-          onQueryChange(val.trim());
-        }, 300);
-        return () => clearTimeout(timer);
-      }, [val]);
-
-      return (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <Icon name="search" className="w-5 h-5" />
-            </div>
-            <input
-              type="text"
-              enterKeyHint="search"
-              placeholder="검색어를 입력하세요"
-              value={val}
-              onChange={e => setVal(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { onQueryChange(val.trim()); } }}
-              className="w-full pl-10 pr-10 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {val && (
-              <button type="button"
-                onClick={() => { setVal(''); onQueryChange(''); }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <Icon name="x" className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          <button type="button" onClick={() => onQueryChange(val.trim())}
-            className="px-4 py-3 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 rounded-xl text-white flex-shrink-0">
-            <Icon name="search" className="w-5 h-5" />
-          </button>
-        </div>
-      );
-    };  // ← AppSearchBar 닫기 (누락된 괄호 복구)
-
     // ── ProgramEditForm: 독립 컴포넌트 (로컬 state → 타이핑 버그 없음) ──
     const ProgramEditForm = ({ initial, onSave, onCancel }) => {
       const inp = (field, fallback='') => initial ? (initial[field] ?? fallback) : fallback;
@@ -1064,41 +914,324 @@
       );
     };
 
+    // 챗봇 응답 로직 (상수 - App 밖에 위치해 재생성 방지)
+    const CHATBOT_RESPONSES = {
+      '특허': '특허 관련 지원사업으로는 "국내외 특허 출원·등록 경비 지원"이 있습니다. 최대 500만원까지 지원받으실 수 있으며, 국내특허 출원 100만원, 등록 100만원, 해외특허 출원 200만원, 등록 300만원을 지원합니다.',
+      '해외': '해외 진출 관련 지원사업으로는 해외인증 획득 지원(최대 70%), 해외전시회 참가 지원, 수출상담회 개최 등이 있습니다. 자세한 내용은 지원사업 목록에서 확인해주세요.',
+      '신청': '지원사업 신청은 홈 화면에서 원하시는 지원사업을 선택한 후 "신청하기" 버튼을 클릭하시면 됩니다. 필요 서류는 각 사업별 상세 페이지에서 확인하실 수 있습니다.',
+      '마감': '마감 임박 지원사업은 홈 화면 "마감 임박" 섹션에서 확인하실 수 있습니다. D-day가 표시되어 마감일까지 남은 일수를 쉽게 확인하실 수 있습니다.',
+      '문의': '문의사항은 산업진흥센터 031-289-0000으로 연락주시거나, support@kfi.or.kr로 이메일을 보내주세요. 평일 09:00~18:00에 상담 가능합니다.',
+      '금융': '금융 지원사업으로는 "소방산업체 금융 경비 지원"(HP보증보험료 50%, 연 50만원 한도)과 "지식재산(IP) 금융 지원사업"(IP 대출 2% 이자 지원, 최대 300만원)이 있습니다.',
+      '전시회': '해외전시회 참가 지원사업을 통해 국제 소방전시회 참가비와 부스비를 지원받으실 수 있습니다. 전시회별 공고를 확인해주세요.',
+      '자격': '지원 자격은 사업별로 다릅니다. 일반적으로 통계청 산업특수분류에 의한 소방산업 종사자 및 기업(단체)이 대상입니다. 각 사업 상세페이지에서 정확한 자격요건을 확인해주세요.',
+      '서류': '일반적으로 지원신청서, 사업자등록증, 관련 증빙서류가 필요합니다. 사업별로 필요 서류가 다르니 상세페이지를 확인해주세요.',
+      '안녕': '안녕하세요! KFI 지원사업 챗봇입니다. 지원사업에 대해 궁금한 점이 있으시면 편하게 질문해주세요.',
+      '도움': '다음 키워드로 질문해보세요: 특허, 해외, 신청, 마감, 문의, 금융, 전시회, 자격, 서류'
+    };
+
+    // 기기 고유 ID 생성/복원 (App 밖에 위치해 재생성 방지)
+    const getOrCreateDeviceId = () => {
+      try {
+        let id = localStorage.getItem('kfi_device_id');
+        if (!id) {
+          id = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          localStorage.setItem('kfi_device_id', id);
+        }
+        return id;
+      } catch(e) { return 'unknown_' + Date.now(); }
+    };
+
+    // =========================================================
+    // ChatbotWidget — App 완전 외부 독립 컴포넌트
+    // window._kfiPrograms로 실시간 사업 데이터 접근
+    // kfi:openProgram 이벤트로 DetailModal 오픈
+    // =========================================================
+    const ChatbotWidget = () => {
+      const [show, setShow] = React.useState(false);
+      const [messages, setMessages] = React.useState([
+        { role: 'bot', text: '안녕하세요! KFI 지원사업 챗봇입니다.\n사업명, 카테고리, 지원내용 등으로 검색해보세요 🔍' }
+      ]);
+      const chatContainerRef = React.useRef(null);
+      const modalRef = React.useRef(null);
+      const hasAnimated = React.useRef(false);
+      const inputRef = React.useRef(null);
+
+      React.useEffect(() => {
+        if (show && modalRef.current && !hasAnimated.current) {
+          const timer = setTimeout(() => {
+            if (modalRef.current) {
+              modalRef.current.style.animation = 'none';
+              modalRef.current.style.transform = 'translateY(0)';
+              modalRef.current.style.opacity = '1';
+            }
+            hasAnimated.current = true;
+          }, 350);
+          return () => clearTimeout(timer);
+        }
+      }, [show]);
+
+      React.useEffect(() => {
+        if (!show) hasAnimated.current = false;
+      }, [show]);
+
+      React.useEffect(() => {
+        const handler = () => setShow(true);
+        window.addEventListener('kfi:openChatbot', handler);
+        return () => window.removeEventListener('kfi:openChatbot', handler);
+      }, []);
+
+      React.useEffect(() => {
+        if (chatContainerRef.current) {
+          setTimeout(() => {
+            if (chatContainerRef.current)
+              chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+          }, 10);
+        }
+      }, [messages]);
+
+      // Firebase 연동 사업 검색
+      const searchPrograms = (query) => {
+        const programs = window._kfiPrograms || [];
+        // 공백으로 단어 분리 후 각 단어가 모두 포함되는 사업 검색
+        const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+        if (!words.length) return [];
+        return programs.filter(p => {
+          const fields = [
+            p.title, p.category, p.subcategory,
+            p.description, p.amount, p.target,
+            ...(p.targetTags || [])
+          ].filter(Boolean).join(' ').toLowerCase();
+          // 모든 단어가 포함되어야 매칭 (AND 검색)
+          return words.every(w => fields.includes(w));
+        }).slice(0, 4);
+      };
+
+      // 메시지가 사업 검색인지 일반 질문인지 판별
+      const getResponse = (msg) => {
+        const text = msg.trim();
+
+        // 0) 마감임박 특수 처리
+        if (text.includes('마감') || text.includes('임박')) {
+          const programs = window._kfiPrograms || [];
+          const urgent = programs
+            .filter(p => p.dday !== null && p.dday >= 0 && p.dday <= 14 && !p.isClosed)
+            .sort((a, b) => a.dday - b.dday)
+            .slice(0, 4);
+          if (urgent.length > 0) {
+            return { type: 'search', results: urgent, prefix: `📅 14일 내 마감 예정 ${urgent.length}건입니다 👇` };
+          }
+          return { type: 'keyword', answer: '현재 14일 내 마감 예정인 지원사업이 없습니다.', results: [] };
+        }
+
+        // 1) 일반 키워드 먼저 체크
+        for (const [keyword, answer] of Object.entries(CHATBOT_RESPONSES)) {
+          if (text.includes(keyword)) {
+            const results = searchPrograms(keyword);
+            return { type: 'keyword', answer, results };
+          }
+        }
+
+        // 2) Firebase 사업 데이터 검색
+        const results = searchPrograms(text);
+        if (results.length > 0) {
+          return { type: 'search', results };
+        }
+
+        // 3) 아무것도 없으면
+        return { type: 'none' };
+      };
+
+      const openProgram = (program) => {
+        setShow(false);
+        window.dispatchEvent(new CustomEvent('kfi:openProgram', { detail: program }));
+      };
+
+      const sendMessage = (msg) => {
+        const text = msg.trim();
+        if (!text) return;
+
+        setMessages(prev => [...prev, { role: 'user', text }]);
+
+        setTimeout(() => {
+          const response = getResponse(text);
+
+          if (response.type === 'none') {
+            setMessages(prev => [...prev, {
+              role: 'bot',
+              text: '관련 지원사업을 찾지 못했습니다.\n다른 키워드로 검색해보시거나 "도움"을 입력해보세요.'
+            }]);
+            return;
+          }
+
+          if (response.type === 'keyword') {
+            setMessages(prev => [...prev, {
+              role: 'bot',
+              text: response.answer,
+              programs: response.results.length > 0 ? response.results : null
+            }]);
+            return;
+          }
+
+          if (response.type === 'search') {
+            const prefix = response.prefix || `"${text}" 관련 지원사업 ${response.results.length}건을 찾았습니다 👇`;
+            setMessages(prev => [...prev, {
+              role: 'bot',
+              text: prefix,
+              programs: response.results
+            }]);
+          }
+        }, 400);
+      };
+
+      const getDdayBadge = (p) => {
+        if (p.isClosed) return { text: '마감', cls: 'bg-gray-100 text-gray-500' };
+        if (p.status === 'always') return { text: '상시', cls: 'bg-blue-100 text-blue-600' };
+        if (p.dday === null) return null;
+        if (p.dday <= 7) return { text: `D-${p.dday}`, cls: 'bg-red-100 text-red-600' };
+        if (p.dday <= 14) return { text: `D-${p.dday}`, cls: 'bg-amber-100 text-amber-600' };
+        return { text: `D-${p.dday}`, cls: 'bg-blue-100 text-blue-600' };
+      };
+
+      // 사업 미니카드
+      const ProgramMiniCard = ({ program }) => {
+        const badge = getDdayBadge(program);
+        return (
+          <div
+            onClick={() => openProgram(program)}
+            className="bg-white border border-slate-200 rounded-xl p-3 cursor-pointer hover:bg-blue-50 hover:border-blue-300 transition-colors mt-2"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-bold text-slate-800 leading-snug line-clamp-2 flex-1">{program.title}</p>
+              {badge && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${badge.cls}`}>{badge.text}</span>}
+            </div>
+            <div className="flex items-center justify-between mt-1.5">
+              <span className="text-[10px] text-slate-400">{program.category}</span>
+              <span className="text-[10px] font-semibold text-blue-600">{program.amount?.split('\n')[0]}</span>
+            </div>
+            <p className="text-[10px] text-blue-500 mt-1">탭하여 상세보기 →</p>
+          </div>
+        );
+      };
+
+      return (
+        <>
+          {/* FAB 버튼 */}
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShow(true); }}
+            className="fixed right-4 bottom-28 w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-all hover:shadow-2xl"
+            style={{ boxShadow: '0 4px 20px rgba(79, 70, 229, 0.4)' }}
+          >
+            <Icon name="messageCircle" className="w-7 h-7" />
+          </button>
+
+          {/* 모달 */}
+          {show && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setShow(false)}>
+              <div
+                ref={modalRef}
+                className="bg-white w-full max-w-lg h-[75vh] rounded-t-3xl overflow-hidden flex flex-col animate-slide-up"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* 헤더 */}
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 flex justify-between items-center flex-shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                      <Icon name="messageCircle" className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="font-bold">KFI 지원사업 챗봇</h2>
+                      <p className="text-xs text-blue-100">사업명·키워드로 검색하세요</p>
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setShow(false)} className="p-2"><Icon name="x" className="w-5 h-5" /></button>
+                </div>
+
+                {/* 메시지 영역 */}
+                <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                  {messages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] ${msg.role === 'user' ? '' : 'w-full'}`}>
+                        <div className={`rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'}`}>
+                          <p className="text-sm leading-relaxed whitespace-pre-line">{msg.text}</p>
+                        </div>
+                        {/* 사업 미니카드 목록 */}
+                        {msg.programs && msg.programs.length > 0 && (
+                          <div className="mt-1 space-y-1">
+                            {msg.programs.map((p, j) => (
+                              <ProgramMiniCard key={j} program={p} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 빠른 질문 버튼 */}
+                <div className="px-4 py-2 bg-slate-50 border-t flex gap-2 overflow-x-auto hide-scrollbar flex-shrink-0">
+                  {['특허', '해외진출', '금융지원', '마감임박', '신청방법', '문의'].map(q => (
+                    <button type="button" key={q} onClick={() => sendMessage(q)}
+                      className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-blue-50 hover:border-blue-300 active:bg-blue-100 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap transition-colors shadow-sm flex-shrink-0">
+                      {q}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 입력 영역 */}
+                <div className="p-3 bg-white border-t flex gap-2 items-center flex-shrink-0">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    enterKeyHint="send"
+                    defaultValue=""
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        sendMessage(e.target.value);
+                        e.target.value = '';
+                      }
+                    }}
+                    placeholder="사업명, 카테고리, 지원내용 검색..."
+                    className="flex-1 px-4 py-3 bg-slate-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border-0"
+                  />
+                  <button type="button" onClick={() => {
+                    if (inputRef.current?.value) {
+                      sendMessage(inputRef.current.value);
+                      inputRef.current.value = '';
+                    }
+                  }} className="w-11 h-11 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-full flex items-center justify-center transition-colors shadow-md flex-shrink-0">
+                    <Icon name="send" className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      );
+    };
+
     function App() {
       const [firebaseReady, setFirebaseReady] = useState(false);
       const [userType, setUserType] = useState(null); // null | 'general' | 'manufacturer' | 'admin'
       const [isAdmin, setIsAdmin] = useState(false);
       const [currentUser, setCurrentUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
-      const [showAdminLogin, setShowAdminLogin] = useState(false);
       const [programs, setPrograms] = useState(window.defaultPrograms || []);
       const [exhibitions, setExhibitions] = useState([]);
-      const [allUsers, setAllUsers] = useState([]);
-      const [userApplications, setUserApplications] = useState([]);
-      const [allApplications, setAllApplications] = useState([]);
       const [visitStats, setVisitStats] = useState([]);
       const [bookmarks, setBookmarks] = useState([]);
       const [notifications, setNotifications] = useState([]);
       const [currentPage, setCurrentPage] = useState('home');
       const [selectedProgram, setSelectedProgram] = useState(null);
       const [searchQuery, setSearchQuery] = useState('');
-      const [searchBarKey, setSearchBarKey] = useState(0);
-      const clearSearch = React.useCallback(() => { setSearchQuery(''); setSearchBarKey(k => k+1); }, []);
+      const clearSearch = React.useCallback(() => { setSearchQuery(''); }, []);
       const [selectedCategory, setSelectedCategory] = useState('전체');
-      const [activeModal, setActiveModal] = useState(null);
-      const [reviewModal, setReviewModal] = useState(null);
-      const [adminFilter, setAdminFilter] = useState('전체');
-      const [statusFilter, setStatusFilter] = useState('전체');
-      const [showNotifications, setShowNotifications] = useState(false);
+      const [sortBy, setSortBy] = useState('default'); // 'default' | 'deadline' | 'amount' | 'newest'
       const [showPreferences, setShowPreferences] = useState(false);
       const [userPreferences, setUserPreferences] = useState({ targetTags: [], subcategories: [] });
-      const [refreshing, setRefreshing] = useState(false);
       const [showSplash, setShowSplash] = useState(true);
-      const [showChatbot, setShowChatbot] = useState(false);
-      const [chatMessages, setChatMessages] = useState([
-        { role: 'bot', text: '안녕하세요! KFI 지원사업 챗봇입니다. 무엇을 도와드릴까요?' }
-      ]);
-      const [programsLoading, setProgramsLoading] = useState(false);
+      const [programsLoading, setProgramsLoading] = useState(true);
       // 사업관리 폼 상태 - App 최상위에서 관리 (탭 전환 시 초기화 방지)
       const [showProgramForm, setShowProgramForm] = useState(false);
       const [editProg, setEditProg] = useState(null);
@@ -1111,10 +1244,15 @@
       });
       const [showExhibitionForm, setShowExhibitionForm] = useState(false);
       const [editExhibition, setEditExhibition] = useState(null);
+      const [toast, setToast] = useState(null); // { msg, icon }
+      const toastTimer = React.useRef(null);
+      const showToast = React.useCallback((msg, icon = '✅') => {
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        setToast({ msg, icon });
+        toastTimer.current = setTimeout(() => setToast(null), 2200);
+      }, []);
 
       useEffect(() => { const h = () => setFirebaseReady(true); window.addEventListener('firebaseReady', h); if (window.firebaseAPI) setFirebaseReady(true); return () => window.removeEventListener('firebaseReady', h); }, []);
-
-      // 검색 쿼리는 AppSearchBar에서 직접 setSearchQuery 호출
 
       // 관리자 Firebase 인증 상태
       useEffect(() => {
@@ -1132,7 +1270,7 @@
             setCurrentUser(null);
             setUserProfile(null);
             setIsAdmin(false);
-            if (isAdmin) setUserType(null);
+            setUserType(null);
           }
         });
       }, [firebaseReady]);
@@ -1142,14 +1280,7 @@
         return window.firebaseAPI.subscribePrograms((p) => { setPrograms(p); setProgramsLoading(false); });
       }, [firebaseReady]);
       useEffect(() => { if (!firebaseReady) return; return window.firebaseAPI.subscribeExhibitions(setExhibitions); }, [firebaseReady]);
-      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeUsers(setAllUsers); }, [firebaseReady, isAdmin]);
-      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeAllApplications(setAllApplications); }, [firebaseReady, isAdmin]);
       useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeVisitStats(setVisitStats); }, [firebaseReady, isAdmin]);
-      useEffect(() => { if (!firebaseReady || isAdmin) return; 
-        const uid = getOrCreateDeviceId();
-        return window.firebaseAPI.subscribeUserApplications(uid, setUserApplications); 
-      }, [firebaseReady, isAdmin]);
-
       // 알림 데이터 생성 (개선: 읽음처리, 중복방지, 활성화 토글)
       useEffect(() => {
         if (!programs.length || !notificationsEnabled) { setNotifications([]); return; }
@@ -1192,10 +1323,11 @@
 
       const toggleBookmark = async (id, e) => {
         e?.stopPropagation();
-        const newBookmarks = bookmarks.includes(id) ? bookmarks.filter(b => b !== id) : [...bookmarks, id];
+        const adding = !bookmarks.includes(id);
+        const newBookmarks = adding ? [...bookmarks, id] : bookmarks.filter(b => b !== id);
         setBookmarks(newBookmarks);
+        showToast(adding ? '북마크에 추가됐습니다' : '북마크에서 제거됐습니다', adding ? '⭐' : '🗑️');
         if (currentUser) await window.firebaseAPI.updateBookmarks(currentUser.uid, newBookmarks);
-        // 로컬 스토리지에도 저장 (비로그인 사용자)
         try { localStorage.setItem('kfi_bookmarks', JSON.stringify(newBookmarks)); } catch(e) {}
       };
 
@@ -1204,25 +1336,6 @@
         try { const saved = localStorage.getItem('kfi_bookmarks'); if (saved) setBookmarks(JSON.parse(saved)); } catch(e) {}
       }, []);
       
-      const submitApplication = async (program) => {
-        try {
-          const deviceId = getOrCreateDeviceId();
-          const r = await window.firebaseAPI.submitApplication({
-            userId: currentUser?.uid || deviceId,
-            userEmail: currentUser?.email || userType + '@kfi.user',
-            userName: userProfile?.name || (userType === 'manufacturer' ? '제조업체 사용자' : '일반 사용자'),
-            userCompany: userProfile?.company || '미등록',
-            programId: program.id || program.docId,
-            programTitle: program.title,
-            programCategory: program.category
-          });
-          if (r.success) {
-            alert('신청이 완료되었습니다!\n\n관리자 검토 후 결과를 알려드립니다.');
-            setSelectedProgram(null);
-          } else { alert('신청 중 오류가 발생했습니다.\n다시 시도해주세요.'); }
-        } catch (error) { alert('신청 중 오류가 발생했습니다.'); }
-      };
-      
       const handleLogout = async () => {
         if (isAdmin) {
           await window.firebaseAPI.signOut();
@@ -1230,7 +1343,6 @@
         }
         setUserType(null);
         setCurrentPage('home');
-        setActiveModal(null);
       };
 
       // ===== 사업관리 CRUD 핸들러 (App 레벨 - 탭 전환해도 상태 유지) =====
@@ -1276,61 +1388,16 @@
         setEditProg(null);
       };
 
-      const savePreferences = async () => {
-        if (currentUser) {
-          await window.firebaseAPI.updateUserProfile(currentUser.uid, { preferences: userPreferences });
-        }
-        try { localStorage.setItem('kfi_prefs', JSON.stringify(userPreferences)); } catch(e) {}
-        alert('맞춤 설정이 저장되었습니다.');
-        setShowPreferences(false);
-      };
-
-      const handleRefresh = async () => {
-        setRefreshing(true);
-        // 데이터 새로고침 시뮬레이션
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setRefreshing(false);
-      };
-
       // 스플래시 화면 타이머
-      useEffect(() => {
-        const timer = setTimeout(() => setShowSplash(false), 2500);
-        return () => clearTimeout(timer);
-      }, []);
-
-      // 챗봇 응답 로직
-      const chatbotResponses = {
-        '특허': '특허 관련 지원사업으로는 "국내외 특허 출원·등록 경비 지원"이 있습니다. 최대 500만원까지 지원받으실 수 있으며, 국내특허 출원 100만원, 등록 100만원, 해외특허 출원 200만원, 등록 300만원을 지원합니다.',
-        '해외': '해외 진출 관련 지원사업으로는 해외인증 획득 지원(최대 70%), 해외전시회 참가 지원, 수출상담회 개최 등이 있습니다. 자세한 내용은 지원사업 목록에서 확인해주세요.',
-        '신청': '지원사업 신청은 홈 화면에서 원하시는 지원사업을 선택한 후 "신청하기" 버튼을 클릭하시면 됩니다. 필요 서류는 각 사업별 상세 페이지에서 확인하실 수 있습니다.',
-        '마감': '마감 임박 지원사업은 홈 화면 "마감 임박" 섹션에서 확인하실 수 있습니다. D-day가 표시되어 마감일까지 남은 일수를 쉽게 확인하실 수 있습니다.',
-        '문의': '문의사항은 산업진흥센터 031-289-0000으로 연락주시거나, support@kfi.or.kr로 이메일을 보내주세요. 평일 09:00~18:00에 상담 가능합니다.',
-        '금융': '금융 지원사업으로는 "소방산업체 금융 경비 지원"(HP보증보험료 50%, 연 50만원 한도)과 "지식재산(IP) 금융 지원사업"(IP 대출 2% 이자 지원, 최대 300만원)이 있습니다.',
-        '전시회': '해외전시회 참가 지원사업을 통해 국제 소방전시회 참가비와 부스비를 지원받으실 수 있습니다. 전시회별 공고를 확인해주세요.',
-        '자격': '지원 자격은 사업별로 다릅니다. 일반적으로 통계청 산업특수분류에 의한 소방산업 종사자 및 기업(단체)이 대상입니다. 각 사업 상세페이지에서 정확한 자격요건을 확인해주세요.',
-        '서류': '일반적으로 지원신청서, 사업자등록증, 관련 증빙서류가 필요합니다. 사업별로 필요 서류가 다르니 상세페이지를 확인해주세요.',
-        '안녕': '안녕하세요! KFI 지원사업 챗봇입니다. 지원사업에 대해 궁금한 점이 있으시면 편하게 질문해주세요.',
-        '도움': '다음 키워드로 질문해보세요: 특허, 해외, 신청, 마감, 문의, 금융, 전시회, 자격, 서류'
-      };
-
-      const handleQuickChat = (msg) => {
-        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
-        setTimeout(() => {
-          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.';
-          for (const [keyword, answer] of Object.entries(chatbotResponses)) {
-            if (msg.includes(keyword)) { response = answer; break; }
-          }
-          setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
-        }, 500);
-      };
-
-      // 프로그램에 D-day 추가
       const programsWithDday = useMemo(() => {
-        return programs.map(p => ({
-          ...p,
-          dday: calculateDday(p.deadline),
-          isClosed: p.status === 'closed' || (calculateDday(p.deadline) !== null && calculateDday(p.deadline) < 0)
-        }));
+        return programs.map(p => {
+          const dday = calculateDday(p.deadline);
+          return {
+            ...p,
+            dday,
+            isClosed: p.status === 'closed' || (dday !== null && dday < 0)
+          };
+        });
       }, [programs]);
 
       const filteredPrograms = useMemo(() => {
@@ -1355,48 +1422,44 @@
         });
       }, [programsWithDday, searchQuery, selectedCategory]);
 
-      const matchedPrograms = useMemo(() => {
-        if (!userPreferences.targetTags?.length && !userPreferences.subcategories?.length) return [];
-        return programsWithDday.filter(p => {
-          const tagMatch = userPreferences.targetTags?.some(tag => p.targetTags?.includes(tag));
-          const subMatch = userPreferences.subcategories?.some(sub => p.subcategory === sub);
-          return (tagMatch || subMatch) && !p.isClosed;
-        });
-      }, [programsWithDday, userPreferences]);
+      const sortedPrograms = useMemo(() => {
+        const arr = [...filteredPrograms];
+        if (sortBy === 'deadline') {
+          // 마감 임박순: 상시(null dday)는 뒤로, 마감된 것도 뒤로
+          return arr.sort((a, b) => {
+            if (a.isClosed && !b.isClosed) return 1;
+            if (!a.isClosed && b.isClosed) return -1;
+            if (a.dday === null && b.dday === null) return 0;
+            if (a.dday === null) return 1;
+            if (b.dday === null) return -1;
+            return a.dday - b.dday;
+          });
+        }
+        if (sortBy === 'amount') {
+          // 지원금액 숫자 추출 후 내림차순
+          const parse = (s) => { const m = (s||'').replace(/,/g,'').match(/\d+/); return m ? parseInt(m[0]) : 0; };
+          return arr.sort((a, b) => parse(b.amount) - parse(a.amount));
+        }
+        if (sortBy === 'newest') {
+          return arr.sort((a, b) => (b.id || 0) - (a.id || 0));
+        }
+        return arr; // default: Firebase 순서 유지
+      }, [filteredPrograms, sortBy]);
 
-      const filteredAdminApps = useMemo(() => { 
-        if (adminFilter === '전체') return allApplications; 
-        if (adminFilter === '검토대기') return allApplications.filter(a => a.status === 'submitted'); 
-        if (adminFilter === '심사중') return allApplications.filter(a => a.status === 'reviewing'); 
-        return allApplications.filter(a => ['approved','rejected'].includes(a.status)); 
-      }, [allApplications, adminFilter]);
-      
-      const filteredUserApps = useMemo(() => { 
-        if (statusFilter === '전체') return userApplications; 
-        if (statusFilter === '진행중') return userApplications.filter(a => ['submitted','reviewing'].includes(a.status)); 
-        if (statusFilter === '완료') return userApplications.filter(a => ['approved'].includes(a.status)); 
-        return userApplications.filter(a => a.status === 'rejected'); 
-      }, [userApplications, statusFilter]);
-      
       const urgentPrograms = programsWithDday.filter(p => p.dday !== null && p.dday >= 0 && p.dday <= 14 && !p.isClosed).sort((a, b) => a.dday - b.dday).slice(0, 5);
 
-      // 로그인 페이지 (일반/관리자 구분)
+      // ChatbotWidget(App 외부)과 데이터 공유
+      useEffect(() => { window._kfiPrograms = programsWithDday; }, [programsWithDday]);
+      useEffect(() => {
+        const handler = (e) => setSelectedProgram(e.detail);
+        window.addEventListener('kfi:openProgram', handler);
+        return () => window.removeEventListener('kfi:openProgram', handler);
+      }, []);
+
       // 프리퍼런스 로컬 복원
       useEffect(() => {
         try { const saved = localStorage.getItem('kfi_prefs'); if (saved) setUserPreferences(JSON.parse(saved)); } catch(e) {}
       }, []);
-
-      // 기기 고유 ID 생성/복원 (UUID)
-      const getOrCreateDeviceId = () => {
-        try {
-          let id = localStorage.getItem('kfi_device_id');
-          if (!id) {
-            id = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('kfi_device_id', id);
-          }
-          return id;
-        } catch(e) { return 'unknown_' + Date.now(); }
-      };
 
       // ===== 유저 타입 선택 화면 =====
       const UserTypeSelectPage = () => {
@@ -1466,7 +1529,7 @@
                   {adminErr && <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-4 text-sm text-red-200">{adminErr}</div>}
                   <div className="space-y-3">
                     <input type="text" placeholder="이메일" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
-                    <input type="password" placeholder="비밀번호" value={adminPw} onChange={e => setAdminPw(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAdminLogin()} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
+                    <input type="password" placeholder="비밀번호" value={adminPw} onChange={e => setAdminPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdminLogin()} className="w-full bg-slate-800/60 border border-slate-600 rounded-xl py-3 px-4 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500" />
                   </div>
                   <button onClick={handleAdminLogin} disabled={adminLoading} className="w-full mt-4 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition disabled:opacity-50">
                     {adminLoading ? '로그인 중...' : '관리자 로그인'}
@@ -1562,7 +1625,7 @@
 
       const Header = () => {
         const inputRef = React.useRef(null);
-        const timerRef = React.useRef(null);
+        const [showNotifications, setShowNotifications] = React.useState(false);
 
         // clearSearch 시 입력값 초기화
         React.useEffect(() => {
@@ -1571,8 +1634,6 @@
           }
         }, [searchQuery]);
 
-        const handleChange = () => {}; // 타이핑 중 검색 없음
-
         const handleSearch = () => {
           if (inputRef.current) setSearchQuery(inputRef.current.value.trim());
         };
@@ -1580,10 +1641,10 @@
         const handleClear = () => {
           if (inputRef.current) inputRef.current.value = '';
           setSearchQuery('');
-          setSearchBarKey(k => k + 1);
         };
 
         return (
+          <>
           <header className="bg-gradient-to-r from-slate-800 to-slate-700 text-white sticky top-0 z-50 safe-top">
             <div className="px-4 py-4">
               <div className="flex justify-between items-center mb-4">
@@ -1601,7 +1662,7 @@
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <button className="relative w-10 h-10 bg-white/10 rounded-full flex items-center justify-center" onClick={() => setShowNotifications(!showNotifications)}>
+                  <button className="relative w-10 h-10 bg-white/10 rounded-full flex items-center justify-center" onClick={() => setShowNotifications(v => !v)}>
                     <Icon name="bell" />
                     {notifications.length > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">{notifications.length}</span>}
                   </button>
@@ -1620,7 +1681,6 @@
                       enterKeyHint="search"
                       placeholder="검색어를 입력하세요"
                       defaultValue=""
-                      onChange={handleChange}
                       onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
                       className="w-full pl-10 pr-10 py-3 rounded-xl bg-white text-slate-900 placeholder-slate-400 text-sm border-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
@@ -1637,52 +1697,49 @@
               )}
             </div>
           </header>
-        );
-      };
-
-      // 알림 패널 (개선: 개별 닫기, 전체닫기)
-      const NotificationPanel = () => {
-        if (!showNotifications) return null;
-        return (
-          <div className="fixed inset-0 z-50" onClick={() => setShowNotifications(false)}>
-            <div className="absolute right-4 top-20 w-80 max-h-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
-              <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
-                <h3 className="font-bold flex items-center gap-2">🔔 알림
-                  {notifications.length > 0 && <span className="text-xs bg-red-500 px-2 py-0.5 rounded-full">{notifications.length}건</span>}
-                </h3>
-                {notifications.length > 0 && (
-                  <button type="button" onClick={(e) => { e.stopPropagation(); notifications.forEach(n => dismissNotification(n.id)); }} className="text-xs text-slate-300 hover:text-white underline">전체 지우기</button>
-                )}
-              </div>
-              <div className="max-h-[300px] overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400">
-                    <div className="text-3xl mb-2">🔕</div>
-                    <p className="text-sm">새 알림이 없습니다.</p>
-                  </div>
-                ) : (
-                  notifications.map(notif => (
-                    <div key={notif.id} className="p-4 border-b border-slate-100 hover:bg-slate-50 flex items-start gap-3 cursor-pointer" onClick={() => {
-                      const program = programsWithDday.find(p => p.id === notif.programId);
-                      if (program) setSelectedProgram(program);
-                      setShowNotifications(false);
-                    }}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0 ${notif.type === 'deadline' ? 'bg-red-500' : 'bg-blue-500'}`}>
-                        {notif.type === 'deadline' ? '⏰' : '🆕'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-slate-900">{notif.title}</p>
-                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{notif.message}</p>
-                      </div>
-                      <button type="button" onClick={(e) => dismissNotification(notif.id, e)} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-slate-600 flex-shrink-0 rounded-full hover:bg-slate-100">
-                        <Icon name="x" className="w-3 h-3" />
-                      </button>
+          {/* 알림 패널 — Header 내부 local state로 제어, App 렌더링 영향 없음 */}
+          {showNotifications && (
+            <div className="fixed inset-0 z-50" onClick={() => setShowNotifications(false)}>
+              <div className="absolute right-4 top-20 w-80 max-h-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+                <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
+                  <h3 className="font-bold flex items-center gap-2">🔔 알림
+                    {notifications.length > 0 && <span className="text-xs bg-red-500 px-2 py-0.5 rounded-full">{notifications.length}건</span>}
+                  </h3>
+                  {notifications.length > 0 && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); notifications.forEach(n => dismissNotification(n.id)); }} className="text-xs text-slate-300 hover:text-white underline">전체 지우기</button>
+                  )}
+                </div>
+                <div className="max-h-[300px] overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400">
+                      <div className="text-3xl mb-2">🔕</div>
+                      <p className="text-sm">새 알림이 없습니다.</p>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    notifications.map(notif => (
+                      <div key={notif.id} className="p-4 border-b border-slate-100 hover:bg-slate-50 flex items-start gap-3 cursor-pointer" onClick={() => {
+                        const program = programsWithDday.find(p => p.id === notif.programId);
+                        if (program) setSelectedProgram(program);
+                        setShowNotifications(false);
+                      }}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0 ${notif.type === 'deadline' ? 'bg-red-500' : 'bg-blue-500'}`}>
+                          {notif.type === 'deadline' ? '⏰' : '🆕'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm text-slate-900">{notif.title}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{notif.message}</p>
+                        </div>
+                        <button type="button" onClick={(e) => dismissNotification(notif.id, e)} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-slate-600 flex-shrink-0 rounded-full hover:bg-slate-100">
+                          <Icon name="x" className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-          </div>
+          )}
+          </>
         );
       };
 
@@ -1717,15 +1774,10 @@
       // 맞춤형 지원사업 설정 모달
       const PreferencesModal = () => {
         const [localPrefs, setLocalPrefs] = useState(userPreferences);
-        const hasAnimated = React.useRef(false);
         
         useEffect(() => {
           if (showPreferences) {
             setLocalPrefs(userPreferences);
-            hasAnimated.current = false;
-            // 다음 렌더링 후 애니메이션 완료 표시
-            const timer = setTimeout(() => { hasAnimated.current = true; }, 350);
-            return () => clearTimeout(timer);
           }
         }, [showPreferences]);
         
@@ -1775,7 +1827,7 @@
         
         const handleSave = async () => {
           setUserPreferences(localPrefs);
-          if (currentUser && !window._testUser) {
+          if (currentUser) {
             await window.firebaseAPI.updateUserProfile(currentUser.uid, { preferences: localPrefs });
           }
           setShowPreferences(false);
@@ -1843,6 +1895,16 @@
 
       const HomePage = () => {
         const [viewMode, setViewMode] = useState('grid');
+        const [showScrollTop, setShowScrollTop] = React.useState(false);
+
+        React.useEffect(() => {
+          const onScroll = () => setShowScrollTop(window.scrollY > 300);
+          window.addEventListener('scroll', onScroll, { passive: true });
+          return () => window.removeEventListener('scroll', onScroll);
+        }, []);
+
+        const openChatbot = () => window.dispatchEvent(new CustomEvent('kfi:openChatbot'));
+
         return (
         <div className="pb-24 animate-fade-in">
           {/* 바로가기 버튼 */}
@@ -1890,16 +1952,26 @@
                 </button>
               </div>
             </div>
-            {searchQuery ? (
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-slate-600"><span className="font-semibold text-blue-600">"{searchQuery}"</span> 검색결과 <span className="font-bold text-slate-900 ml-1">{filteredPrograms.length}건</span></p>
-                <button type="button" onClick={clearSearch} className="flex items-center gap-1 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-xs font-medium text-slate-600">
-                  <Icon name="x" className="w-3 h-3" />초기화
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500">총 {filteredPrograms.length}개의 지원사업</p>
-            )}
+            {/* 검색결과 + 정렬 드롭다운 */}
+            <div className="flex items-center justify-between gap-2">
+              {searchQuery ? (
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <p className="text-sm text-slate-600 truncate"><span className="font-semibold text-blue-600">"{searchQuery}"</span> <span className="font-bold text-slate-900">{sortedPrograms.length}건</span></p>
+                  <button type="button" onClick={() => { clearSearch(); setSelectedCategory('전체'); }} className="flex items-center gap-1 px-3 py-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-xs font-medium text-slate-600 whitespace-nowrap flex-shrink-0">
+                    <Icon name="x" className="w-3 h-3" />초기화
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 flex-1">총 {sortedPrograms.length}개의 지원사업</p>
+              )}
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                className="text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 flex-shrink-0">
+                <option value="default">기본순</option>
+                <option value="deadline">마감 임박순</option>
+                <option value="amount">지원금액순</option>
+                <option value="newest">최신 등록순</option>
+              </select>
+            </div>
           </div>
 
           {/* 지원사업 목록 */}
@@ -1908,83 +1980,40 @@
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {[1,2,3,4].map(i => <SkeletonCard key={i} />)}
               </div>
-            ) : filteredPrograms.length === 0 ? (
+            ) : sortedPrograms.length === 0 ? (
               <div className="py-16 text-center">
                 <div className="text-5xl mb-4">🔍</div>
                 <p className="text-slate-600 font-medium mb-2">검색 결과가 없습니다</p>
-                <p className="text-sm text-slate-400 mb-4">다른 키워드로 검색해 보세요</p>
-                <button type="button" onClick={() => { clearSearch(); setSelectedCategory('전체'); }} className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium">전체 목록 보기</button>
+                <p className="text-sm text-slate-400 mb-5">다른 키워드로 검색하거나 챗봇에 물어보세요</p>
+                <div className="flex gap-3 justify-center">
+                  <button type="button" onClick={() => { clearSearch(); setSelectedCategory('전체'); }} className="px-5 py-2.5 bg-slate-200 text-slate-700 rounded-full text-sm font-medium">전체 목록 보기</button>
+                  <button type="button" onClick={openChatbot} className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium flex items-center gap-1.5">
+                    <Icon name="messageCircle" className="w-4 h-4" />챗봇에 물어보기
+                  </button>
+                </div>
               </div>
             ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {filteredPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="grid" />)}
+                {sortedPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="grid" />)}
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="list" />)}
+                {sortedPrograms.map(p => <ProgramCard key={p.id || p.docId} program={p} viewMode="list" />)}
               </div>
             )}
           </div>
+
+          {/* 스크롤 상단 복귀 버튼 */}
+          {showScrollTop && (
+            <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="fixed left-4 bottom-28 w-11 h-11 bg-white border border-slate-200 text-slate-600 rounded-full shadow-lg flex items-center justify-center z-40 hover:bg-slate-50 active:scale-95 transition-all">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"/></svg>
+            </button>
+          )}
         </div>
         );
       };
 
-
-      // 신청현황 (Pull to Refresh)
-      const StatusPage = () => {
-        const [pullY, setPullY] = useState(0);
-        const THRESHOLD = 80;
-
-        const handleTouchStart = (e) => { window._touchStartY = e.touches[0].clientY; };
-        const handleTouchMove = (e) => {
-          if (!window._touchStartY) return;
-          const delta = e.touches[0].clientY - window._touchStartY;
-          if (delta > 0) setPullY(Math.min(delta, THRESHOLD + 20));
-        };
-        const handleTouchEnd = async () => {
-          if (pullY >= THRESHOLD && !refreshing) { await handleRefresh(); }
-          setPullY(0);
-          window._touchStartY = null;
-        };
-        const pullProgress = Math.min(pullY / THRESHOLD, 1);
-
-        return (
-          <div className="pb-24 px-4 py-4 animate-fade-in" onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-            {/* 당기기 인디케이터 (개선5) */}
-            <div className="flex justify-center overflow-hidden transition-all" style={{ height: pullY > 0 ? pullY * 0.6 : 0 }}>
-              <div className={`flex items-center gap-2 text-sm transition-all ${pullProgress >= 1 ? 'text-blue-600' : 'text-slate-400'}`} style={{ opacity: pullProgress }}>
-                <div className={`w-5 h-5 border-2 rounded-full transition-all ${pullProgress >= 1 ? 'border-blue-500 border-t-transparent animate-spin' : 'border-slate-300'}`} />
-                {pullProgress >= 1 ? '놓으면 새로고침' : '당겨서 새로고침'}
-              </div>
-            </div>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">📝 신청 현황 <LiveBadge /></h2>
-            <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar">
-              {['전체', '진행중', '완료', '반려'].map(f => (
-                <button key={f} onClick={() => setStatusFilter(f)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${statusFilter === f ? 'bg-slate-800 text-white' : 'bg-white'}`}>{f}</button>
-              ))}
-            </div>
-            <div className="space-y-3">
-              {filteredUserApps.length === 0 ? (
-                <div className="bg-white rounded-2xl p-10 text-center shadow-sm">
-                  <div className="text-5xl mb-4">📋</div>
-                  <p className="font-semibold text-slate-700 mb-1">신청 내역이 없습니다</p>
-                  <p className="text-sm text-slate-400 mb-5">지원사업을 찾아 신청해보세요</p>
-                  <button onClick={() => setCurrentPage('home')} className="px-6 py-2.5 bg-blue-600 text-white rounded-full text-sm font-semibold">지원사업 둘러보기 →</button>
-                </div>
-              ) : (
-                filteredUserApps.map(app => (
-                  <div key={app.docId} className="bg-white rounded-2xl p-5 shadow-sm">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
-                    <h3 className="font-bold my-3">{app.programTitle}</h3>
-                    <p className="text-sm text-slate-500">신청일: {app.createdAt ? new Date(app.createdAt).toLocaleDateString('ko-KR') : '-'}</p>
-                    {app.reviewNote && <p className="text-sm text-red-500 mt-2">💬 {app.reviewNote}</p>}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        );
-      };
 
       // ===== 관리자 대시보드 =====
       // ===== 사업 순서 변경 컴포넌트 =====
@@ -2309,39 +2338,6 @@
         );
       };
 
-      const AdminStatusPage = () => (
-        <div className="pb-24 px-4 py-4 animate-fade-in">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">📑 접수 관리 <LiveBadge /></h2>
-          <div className="flex gap-2 mb-4 overflow-x-auto hide-scrollbar">
-            {['전체', '검토대기', '심사중', '완료'].map(f => (
-              <button key={f} onClick={() => setAdminFilter(f)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${adminFilter === f ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                {f} ({f === '전체' ? allApplications.length : f === '검토대기' ? allApplications.filter(a => a.status === 'submitted').length : f === '심사중' ? allApplications.filter(a => a.status === 'reviewing').length : allApplications.filter(a => ['approved','rejected'].includes(a.status)).length})
-              </button>
-            ))}
-          </div>
-          <div className="space-y-3">
-            {filteredAdminApps.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 text-center text-slate-400">신청 내역이 없습니다.</div>
-            ) : (
-              filteredAdminApps.map(app => (
-                <div key={app.docId} className="bg-white rounded-2xl p-4 shadow-sm">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded">{app.userCompany}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${getStatusBadge(app.status).class}`}>{getStatusBadge(app.status).text}</span>
-                  </div>
-                  <h3 className="font-bold text-sm mb-2">{app.programTitle}</h3>
-                  <p className="text-xs text-slate-400 mb-2">{app.userName} · {app.userEmail}</p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-slate-400">{app.createdAt ? new Date(app.createdAt).toLocaleDateString('ko-KR') : '-'}</span>
-                    <button type="button" onClick={() => setReviewModal(app)} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg">심사</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      );
-
       const CalendarPage = () => {
         const [calView, setCalView] = useState('deadline'); // 'deadline' | 'exhibition'
         const deadlinePrograms = useMemo(() => programsWithDday.filter(p => p.dday !== null && p.dday >= 0 && p.dday <= 60 && !p.isClosed).sort((a,b) => a.dday - b.dday), [programsWithDday]);
@@ -2392,18 +2388,67 @@
         );
       };
 
-      const MyPage = () => (
+      const MyPage = () => {
+        const bookmarkedPrograms = programsWithDday.filter(p => bookmarks.includes(p.id || p.docId));
+        const openChatbot = () => window.dispatchEvent(new CustomEvent('kfi:openChatbot'));
+        return (
         <div className="pb-24 px-4 py-4 animate-fade-in">
-          <div className="bg-white rounded-2xl p-6 text-center mb-6 shadow-sm">
+          {/* 프로필 카드 */}
+          <div className="bg-white rounded-2xl p-6 text-center mb-5 shadow-sm">
             <div className="w-20 h-20 bg-gradient-to-r from-slate-800 to-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl text-white">
               {isAdmin ? <Icon name="settings" className="w-10 h-10"/> : userType === 'manufacturer' ? '🏭' : '👤'}
             </div>
             <h2 className="text-xl font-bold">{isAdmin ? '관리자' : userType === 'manufacturer' ? '제조업체' : '일반사용자'}</h2>
             {isAdmin && currentUser && <p className="text-sm text-slate-400 mt-1">{currentUser.email}</p>}
           </div>
+
+          {/* 북마크 목록 */}
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">⭐ 저장한 지원사업 <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{bookmarkedPrograms.length}</span></h3>
+            </div>
+            {bookmarkedPrograms.length === 0 ? (
+              <div className="bg-white rounded-2xl p-8 text-center shadow-sm border border-slate-100">
+                <div className="text-4xl mb-3">⭐</div>
+                <p className="font-semibold text-slate-700 mb-1">저장한 사업이 없습니다</p>
+                <p className="text-sm text-slate-400 mb-4">관심 있는 지원사업의 ★ 버튼을 눌러 저장하세요</p>
+                <button type="button" onClick={openChatbot} className="px-4 py-2 bg-blue-600 text-white rounded-full text-sm font-medium flex items-center gap-1.5 mx-auto">
+                  <Icon name="messageCircle" className="w-4 h-4" />챗봇으로 사업 찾기
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {bookmarkedPrograms.map(p => {
+                  const badge = p.isClosed ? { text: '마감', cls: 'bg-gray-100 text-gray-500' }
+                    : p.status === 'always' ? { text: '상시', cls: 'bg-blue-100 text-blue-600' }
+                    : p.dday !== null ? { text: `D-${p.dday}`, cls: p.dday <= 7 ? 'bg-red-100 text-red-600' : p.dday <= 14 ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600' }
+                    : null;
+                  return (
+                    <div key={p.id || p.docId}
+                      onClick={() => setSelectedProgram(p)}
+                      className={`bg-white rounded-2xl p-4 shadow-sm cursor-pointer border border-slate-100 hover:shadow-md transition flex items-start gap-3 ${p.isClosed ? 'opacity-60' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge ? badge.cls : 'bg-slate-100 text-slate-500'}`}>{badge ? badge.text : '확인필요'}</span>
+                          <span className="text-[10px] text-slate-400">{p.category}</span>
+                        </div>
+                        <p className="font-bold text-sm text-slate-900 line-clamp-2">{p.title}</p>
+                        <p className="text-xs text-slate-500 mt-1">{p.amount?.split('\n')[0]}</p>
+                      </div>
+                      <button onClick={(e) => toggleBookmark(p.id || p.docId, e)} className="p-1.5 rounded-full hover:bg-red-50 flex-shrink-0 mt-0.5">
+                        <Icon name="starFilled" className="w-4 h-4 text-amber-400" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <button onClick={handleLogout} className="w-full py-3 bg-red-50 text-red-500 font-semibold rounded-2xl border border-red-100">로그아웃</button>
         </div>
-      );
+        );
+      };
 
       const DetailModal = () => { 
         if (!selectedProgram) return null;
@@ -2474,7 +2519,18 @@
                 )}
               </div>
               <div className="p-4 border-t flex gap-3 safe-bottom">
-                <button type="button" onClick={() => setSelectedProgram(null)} className="flex-1 py-4 rounded-xl font-semibold bg-slate-100">닫기</button>
+                <button type="button" onClick={() => setSelectedProgram(null)} className="py-4 px-4 rounded-xl font-semibold bg-slate-100 flex-shrink-0">닫기</button>
+                <button type="button" onClick={async () => {
+                  const text = `[KFI 지원사업]\n${selectedProgram.title}\n마감: ${selectedProgram.deadline}\n지원: ${selectedProgram.amount}\n${selectedProgram.applyUrl || 'https://www.kfi.or.kr'}`;
+                  if (navigator.share) {
+                    try { await navigator.share({ title: selectedProgram.title, text }); } catch(e) {}
+                  } else {
+                    try { await navigator.clipboard.writeText(text); showToast('클립보드에 복사됐습니다', '📋'); } catch(e) {}
+                  }
+                }} className="py-4 px-4 rounded-xl font-semibold bg-slate-100 flex-shrink-0 flex items-center gap-1.5 text-slate-700">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                  공유
+                </button>
                 {isClosed ? (
                   <button disabled className="flex-1 py-4 rounded-xl font-semibold bg-gray-300 text-gray-500">마감됨</button>
                 ) : (
@@ -2486,226 +2542,6 @@
                   </button>
                 )}
               </div>
-            </div>
-          </div>
-        );
-      };
-
-      const ReviewModal = () => { 
-        if (!reviewModal) return null; 
-        const [note, setNote] = useState(''); 
-        const [loading, setLoading] = useState(false); 
-        
-        const handleAction = async (status, step) => { 
-          if (status === 'rejected' && !note.trim()) { alert('반려 사유를 입력해주세요.'); return; } 
-          setLoading(true); 
-          await window.firebaseAPI.updateApplicationStatus(reviewModal.docId, status, step, note); 
-          setLoading(false); 
-          setReviewModal(null); 
-          alert(status === 'approved' ? '승인되었습니다.' : status === 'rejected' ? '반려되었습니다.' : '상태가 변경되었습니다.');
-        }; 
-        
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setReviewModal(null)}>
-            <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
-              <div className="bg-slate-800 text-white p-5"><h2 className="text-lg font-bold">신청서 심사</h2><p className="text-sm text-slate-300">{reviewModal.userCompany}</p></div>
-              <div className="p-5">
-                <p className="font-medium mb-2">{reviewModal.programTitle}</p>
-                <p className="text-sm text-slate-500 mb-4">{reviewModal.userName} · {reviewModal.userEmail}</p>
-                <textarea className="w-full border rounded-xl p-3 text-sm" rows="3" placeholder="심사 의견" value={note} onChange={e => setNote(e.target.value)} />
-              </div>
-              <div className="flex gap-3 p-4 border-t">
-                <button type="button" onClick={() => handleAction('rejected', 2)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-red-100 text-red-600">반려</button>
-                <button type="button" onClick={() => handleAction('reviewing', 2)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-amber-100 text-amber-600">심사중</button>
-                <button type="button" onClick={() => handleAction('approved', 3)} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold bg-emerald-600 text-white">승인</button>
-              </div>
-            </div>
-          </div>
-        );
-      };
-
-      const MyPageModal = () => { 
-        if (!activeModal) return null;
-        
-        const APP_VERSION = "1.1.0";
-        const patchNotes = [
-          {
-            version: "1.1.0",
-            date: "2025.01.16",
-            changes: [
-              { type: "improve", text: "모바일 사용성 전면 개선" },
-              { type: "improve", text: "검색 UI 개선 (검색 버튼 강조, 결과 표시 개선)" },
-              { type: "improve", text: "검색 결과 없을 때 안내 메시지 추가" },
-              { type: "improve", text: "하단 네비게이션 디자인 개선" },
-              { type: "improve", text: "챗봇 입력창 및 버튼 디자인 개선" },
-              { type: "improve", text: "버튼 터치 피드백 추가" },
-              { type: "fix", text: "입력 필드 자동 확대 방지" },
-            ]
-          },
-          {
-            version: "1.0.7",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "모바일 키보드 드롭 현상 해결" },
-              { type: "new", text: "검색 버튼 추가 (모바일 사용성 개선)" },
-              { type: "new", text: "검색어 초기화 기능 추가" },
-              { type: "improve", text: "한글 입력 중 엔터키 오동작 방지" },
-            ]
-          },
-          {
-            version: "1.0.6",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "검색창/챗봇 입력 시 키보드 드롭 현상 완전 해결" },
-              { type: "improve", text: "입력 방식 개선 (엔터키로 검색/전송)" },
-              { type: "improve", text: "지원사업 통합 검색 기능 (제목, 카테고리, 태그)" },
-            ]
-          },
-          {
-            version: "1.0.5",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "검색창/챗봇 입력 시 키보드가 닫히는 오류 수정" },
-              { type: "improve", text: "지원사업 검색 기능 개선 (제목, 카테고리, 태그 등 통합 검색)" },
-            ]
-          },
-          {
-            version: "1.0.4",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "입력 관련 안정성 개선" },
-            ]
-          },
-          {
-            version: "1.0.3",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "챗봇 질문 버튼 클릭 시 화면 깜빡임 현상 수정" },
-              { type: "improve", text: "챗봇 모달 애니메이션 안정성 개선" },
-            ]
-          },
-          {
-            version: "1.0.2",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "맞춤지원사업 설정 버튼 클릭 시 깜빡임 현상 수정" },
-              { type: "fix", text: "챗봇 모달 내 버튼 깜빡임 현상 수정" },
-              { type: "improve", text: "전체 모달 애니메이션 안정성 개선" },
-            ]
-          },
-          {
-            version: "1.0.1",
-            date: "2025.01.16",
-            changes: [
-              { type: "fix", text: "검색창 한글 입력 시 한 글자씩 끊기는 오류 수정" },
-              { type: "improve", text: "한글 조합 중 검색 안정성 개선" },
-            ]
-          },
-          {
-            version: "1.0.0",
-            date: "2025.01.16",
-            changes: [
-              { type: "new", text: "KFI 지원사업 비서 앱 정식 출시" },
-              { type: "new", text: "맞춤형 지원사업 추천 기능" },
-              { type: "new", text: "AI 챗봇 상담 기능" },
-              { type: "new", text: "지원사업 즐겨찾기 기능" },
-              { type: "new", text: "신청 현황 실시간 확인" },
-            ]
-          },
-        ];
-        
-        const getChangeIcon = (type) => {
-          switch(type) {
-            case 'new': return { icon: 'sparkles', color: 'text-emerald-500', bg: 'bg-emerald-50', label: '새 기능' };
-            case 'improve': return { icon: 'wrench', color: 'text-blue-500', bg: 'bg-blue-50', label: '개선' };
-            case 'fix': return { icon: 'bug', color: 'text-amber-500', bg: 'bg-amber-50', label: '버그 수정' };
-            default: return { icon: 'info', color: 'text-slate-500', bg: 'bg-slate-50', label: '기타' };
-          }
-        };
-        
-        const content = { 
-          profile: (
-            <div className="space-y-4">
-              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">이름</p><p className="font-semibold">{userProfile?.name}</p></div>
-              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">회사</p><p className="font-semibold">{userProfile?.company}</p></div>
-              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">이메일</p><p className="font-semibold">{currentUser?.email}</p></div>
-              <div className="bg-slate-50 rounded-xl p-4"><p className="text-xs text-slate-500">연락처</p><p className="font-semibold">{userProfile?.phone || '미등록'}</p></div>
-            </div>
-          ), 
-          bookmark: (
-            <div className="space-y-3">
-              {bookmarks.length === 0 ? <p className="text-center py-8 text-slate-400">즐겨찾기가 없습니다.</p> : 
-                programsWithDday.filter(p => bookmarks.includes(p.id || p.docId)).map(p => (
-                  <div key={p.id || p.docId} className="bg-slate-50 rounded-xl p-4 flex justify-between items-center">
-                    <div className="flex-1 mr-3">
-                      <p className="font-medium text-sm line-clamp-1">{p.title}</p>
-                      <p className="text-xs text-slate-500">{p.category}</p>
-                    </div>
-                    <button onClick={() => toggleBookmark(p.id || p.docId)} className="text-amber-400"><Icon name="starFilled" className="w-5 h-5" /></button>
-                  </div>
-                ))
-              }
-            </div>
-          ), 
-          help: (
-            <div className="space-y-4">
-              <div className="bg-blue-50 rounded-xl p-4"><p className="font-semibold">📞 전화문의</p><p className="text-lg font-bold text-blue-600">031-289-0000</p><p className="text-xs text-slate-500 mt-1">평일 09:00~18:00</p></div>
-              <div className="bg-slate-50 rounded-xl p-4"><p className="font-semibold">📧 이메일</p><p>support@kfi.or.kr</p></div>
-              <a href="https://kfi.or.kr" target="_blank" rel="noopener noreferrer" className="block bg-slate-800 text-white rounded-xl p-4 text-center font-semibold">기술원 홈페이지 바로가기</a>
-            </div>
-          ),
-          version: (
-            <div className="space-y-6">
-              {/* 현재 버전 정보 */}
-              <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-2xl p-5 text-white text-center">
-                <p className="text-xs text-slate-300 mb-1">현재 버전</p>
-                <p className="text-3xl font-bold">v{APP_VERSION}</p>
-                <p className="text-xs text-slate-400 mt-2">최신 버전입니다</p>
-              </div>
-              
-              {/* 패치노트 목록 */}
-              <div>
-                <h3 className="font-bold text-slate-900 mb-3">📋 업데이트 내역</h3>
-                <div className="space-y-4">
-                  {patchNotes.map((note, idx) => (
-                    <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                        <span className="font-bold text-slate-800">v{note.version}</span>
-                        <span className="text-xs text-slate-500">{note.date}</span>
-                      </div>
-                      <div className="p-4 space-y-2">
-                        {note.changes.map((change, cidx) => {
-                          const style = getChangeIcon(change.type);
-                          return (
-                            <div key={cidx} className="flex items-start gap-3">
-                              <div className={`w-6 h-6 rounded-full ${style.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
-                                <Icon name={style.icon} className={`w-3.5 h-3.5 ${style.color}`} />
-                              </div>
-                              <p className="text-sm text-slate-700 leading-relaxed">{change.text}</p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* 앱 정보 */}
-              <div className="text-center text-xs text-slate-400 pt-4 border-t border-slate-100">
-                <p>KFI 지원사업 비서</p>
-                <p className="mt-1">© 2025 한국소방산업기술원</p>
-              </div>
-            </div>
-          )
-        }; 
-        const titles = { profile: '내 정보', bookmark: '즐겨찾기', help: '문의하기', version: '버전 정보' }; 
-        
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setActiveModal(null)}>
-            <div className="bg-white w-full max-h-[70vh] rounded-t-3xl overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
-              <div className="p-5 border-b flex justify-between items-center"><h2 className="text-lg font-bold">{titles[activeModal]}</h2><button type="button" onClick={() => setActiveModal(null)} className="p-2"><Icon name="x" className="w-5 h-5" /></button></div>
-              <div className="p-5 overflow-y-auto max-h-[50vh]">{content[activeModal]}</div>
             </div>
           </div>
         );
@@ -2753,160 +2589,6 @@
         </div>
       );
 
-      // 챗봇 모달
-      const ChatbotModal = () => {
-        const chatContainerRef = React.useRef(null);
-        const modalRef = React.useRef(null);
-        const hasAnimated = React.useRef(false);
-        
-        useEffect(() => {
-          // 애니메이션 완료 후 클래스 제거
-          if (showChatbot && modalRef.current && !hasAnimated.current) {
-            const timer = setTimeout(() => {
-              if (modalRef.current) {
-                modalRef.current.style.animation = 'none';
-                modalRef.current.style.transform = 'translateY(0)';
-                modalRef.current.style.opacity = '1';
-              }
-              hasAnimated.current = true;
-            }, 350);
-            return () => clearTimeout(timer);
-          }
-        }, [showChatbot]);
-        
-        useEffect(() => {
-          // 모달이 닫힐 때 애니메이션 상태 리셋
-          if (!showChatbot) {
-            hasAnimated.current = false;
-          }
-        }, [showChatbot]);
-        
-        useEffect(() => {
-          // 부모 컨테이너 내에서만 스크롤 (setTimeout으로 DOM 업데이트 후 실행)
-          if (chatContainerRef.current) {
-            setTimeout(() => {
-              if (chatContainerRef.current) {
-                chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-              }
-            }, 10);
-          }
-        }, [chatMessages]);
-        
-        if (!showChatbot) return null;
-
-        const handleQuickQuestion = (q) => {
-          setChatMessages(prev => [...prev, { role: 'user', text: q }]);
-          setTimeout(() => {
-            let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다.';
-            for (const [keyword, answer] of Object.entries(chatbotResponses)) {
-              if (q.includes(keyword)) { response = answer; break; }
-            }
-            setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
-          }, 500);
-        };
-
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center" onClick={() => setShowChatbot(false)}>
-            <div 
-              ref={modalRef}
-              className="bg-white w-full max-w-lg h-[70vh] rounded-t-3xl overflow-hidden flex flex-col animate-slide-up"
-              onClick={e => e.stopPropagation()}
-            >
-              {/* 헤더 */}
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-                    <Icon name="messageCircle" className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="font-bold">KFI 지원사업 챗봇</h2>
-                    <p className="text-xs text-blue-100">무엇이든 물어보세요</p>
-                  </div>
-                </div>
-                <button type="button" onClick={() => setShowChatbot(false)} className="p-2"><Icon name="x" className="w-5 h-5" /></button>
-              </div>
-              
-              {/* 메시지 영역 */}
-              <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'}`}>
-                      <p className="text-sm leading-relaxed">{msg.text}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              {/* 빠른 질문 버튼 */}
-              <div className="px-4 py-3 bg-slate-50 border-t flex gap-2 overflow-x-auto hide-scrollbar">
-                {['특허 지원', '해외 진출', '신청 방법', '문의처'].map(q => (
-                  <button type="button" key={q} onClick={() => handleQuickQuestion(q)} className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 active:bg-slate-200 rounded-full text-xs font-medium text-slate-700 whitespace-nowrap transition-colors shadow-sm">{q}</button>
-                ))}
-              </div>
-              
-              {/* 입력 영역 */}
-              <div className="p-3 bg-white border-t flex gap-2 items-end">
-                <input 
-                  id="chatInputField"
-                  type="text"
-                  enterKeyHint="send"
-                  defaultValue=""
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      const input = e.target;
-                      const msg = input.value.trim();
-                      if (msg) {
-                        setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
-                        input.value = '';
-                        setTimeout(() => {
-                          let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
-                          for (const [keyword, answer] of Object.entries(chatbotResponses)) {
-                            if (msg.includes(keyword)) { response = answer; break; }
-                          }
-                          setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
-                        }, 500);
-                      }
-                    }
-                  }}
-                  placeholder="질문을 입력하세요..." 
-                  className="flex-1 px-4 py-3 bg-slate-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border-0"
-                />
-                <button type="button" onClick={() => {
-                  const input = document.getElementById('chatInputField');
-                  const msg = input?.value?.trim();
-                  if (msg) {
-                    setChatMessages(prev => [...prev, { role: 'user', text: msg }]);
-                    input.value = '';
-                    setTimeout(() => {
-                      let response = '죄송합니다. 해당 질문에 대한 답변을 찾지 못했습니다. "도움"을 입력하시면 사용 가능한 키워드를 안내해드립니다.';
-                      for (const [keyword, answer] of Object.entries(chatbotResponses)) {
-                        if (msg.includes(keyword)) { response = answer; break; }
-                      }
-                      setChatMessages(prev => [...prev, { role: 'bot', text: response }]);
-                    }, 500);
-                  }
-                }} className="w-11 h-11 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-full flex items-center justify-center transition-colors shadow-md">
-                  <Icon name="send" className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      };
-
-      // 챗봇 FAB 버튼
-      const ChatbotFAB = () => (
-        <button 
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowChatbot(true); }} 
-          className="fixed right-4 bottom-28 w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center z-40 active:scale-95 transition-all hover:shadow-2xl"
-          style={{ boxShadow: '0 4px 20px rgba(79, 70, 229, 0.4)' }}
-        >
-          <Icon name="messageCircle" className="w-7 h-7" />
-        </button>
-      );
-
       // 스플래시 화면 표시
       if (showSplash) return <SplashScreen />;
 
@@ -2915,19 +2597,23 @@
       return (
         <div className="min-h-screen bg-slate-100">
           <Header />
-          <NotificationPanel />
           <main>
             {currentPage === 'home' && (isAdmin ? <AdminDashboard /> : <HomePage />)}
             {currentPage === 'calendar' && <CalendarPage />}
             {currentPage === 'mypage' && <MyPage />}
           </main>
           <BottomNav />
-          <ChatbotFAB />
+          <ChatbotWidget />
           <DetailModal />
-          <MyPageModal />
-          <ReviewModal />
-          <PreferencesModal />
-          <ChatbotModal />
+          {/* Toast 알림 */}
+          {toast && (
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[90] pointer-events-none">
+              <div className="bg-slate-800 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-medium animate-fade-in whitespace-nowrap">
+                <span>{toast.icon}</span>
+                <span>{toast.msg}</span>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
