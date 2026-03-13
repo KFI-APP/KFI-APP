@@ -18,13 +18,12 @@
   
   <title>소방산업 지원사업 비서</title>
   
-  <link rel="icon" type="image/png" href="./logo.png">
-  <link rel="apple-touch-icon" href="./logo.png">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🔥&lt;/text&gt;&lt;/svg&gt;">
   
   <!-- 자동 업데이트 버전 체크 -->
   <script>
     (function() {
-      const CURRENT_VERSION = '20260313-009'; // 배포할 때마다 변경
+      const CURRENT_VERSION = '20260313-010'; // 배포할 때마다 변경
       const CHECK_KEY = 'kfi_last_version_check';
       const now = Date.now();
       const lastCheck = parseInt(localStorage.getItem(CHECK_KEY) || '0');
@@ -97,10 +96,12 @@
       background_color: "#1d408b",
       theme_color: "#1d408b",
       orientation: "portrait",
-      icons: [
-        { src: "./logo.png", sizes: "192x192", type: "image/png" },
-        { src: "./logo.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
-      ]
+      icons: [{
+        src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%231e3a5f'/><text x='50%' y='54%' dominant-baseline='middle' text-anchor='middle' font-size='200' font-family='Arial Black,sans-serif' font-weight='900' fill='white'>KFI</text></svg>",
+        sizes: "512x512",
+        type: "image/svg+xml",
+        purpose: "any maskable"
+      }]
     };
     const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
     const manifestURL = URL.createObjectURL(manifestBlob);
@@ -962,13 +963,41 @@
             }, { merge: true });
           }
         } catch(e) { console.warn('[KFI] visitStats write 실패:', e); }
+
+        // ★ 누적 전용 문서(_total) — 날짜별 데이터가 날아가도 절대 초기화 안 됨
+        try {
+          const increment = firebase.firestore.FieldValue.increment(1);
+          const totalRef = db.collection("visitStats").doc("_total");
+          const totalUpdate = {
+            total: increment,
+            [userType]: increment,
+            updatedAt: new Date().toISOString()
+          };
+          if (isUniqueToday) {
+            totalUpdate.unique = increment;
+            totalUpdate[`unique_${userType}`] = increment;
+          }
+          await totalRef.set(totalUpdate, { merge: true });
+        } catch(e) { console.warn('[KFI] _total 업데이트 실패:', e); }
       },
 
       subscribeVisitStats: (callback) => {
         const q = db.collection("visitStats").orderBy("date", "desc");
         return q.onSnapshot((snapshot) => {
-          const stats = []; snapshot.forEach((doc) => stats.push({ id: doc.id, ...doc.data() })); callback(stats);
+          const stats = [];
+          snapshot.forEach((doc) => {
+            if (doc.id !== '_total') stats.push({ id: doc.id, ...doc.data() }); // _total 제외
+          });
+          callback(stats);
         }, () => callback([]));
+      },
+
+      subscribeVisitTotal: (callback) => {
+        // 누적 전용 문서 실시간 구독
+        return db.collection("visitStats").doc("_total").onSnapshot(
+          (doc) => callback(doc.exists ? doc.data() : null),
+          () => callback(null)
+        );
       },
 
       // 프로그램 CRUD
@@ -8900,6 +8929,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
       const [programs, setPrograms] = useState(window.defaultPrograms || []);
       const [exhibitions, setExhibitions] = useState([]);
       const [visitStats, setVisitStats] = useState([]);
+      const [visitTotal, setVisitTotal] = useState(null); // ★ 누적 전용 _total 문서
       const [bookmarks, setBookmarks] = useState([]);
       const [notifications, setNotifications] = useState([]);
       const [currentPage, setCurrentPage] = useState('home');
@@ -8970,6 +9000,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
       }, [firebaseReady]);
       useEffect(() => { if (!firebaseReady) return; return window.firebaseAPI.subscribeExhibitions(setExhibitions); }, [firebaseReady]);
       useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeVisitStats(setVisitStats); }, [firebaseReady, isAdmin]);
+      useEffect(() => { if (!firebaseReady || !isAdmin) return; return window.firebaseAPI.subscribeVisitTotal(setVisitTotal); }, [firebaseReady, isAdmin]); // ★ _total 구독
       // 알림 데이터 생성 (개선: 읽음처리, 중복방지, 활성화 토글)
       useEffect(() => {
         if (!programs.length || !notificationsEnabled) { setNotifications([]); return; }
@@ -9878,8 +9909,11 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
       };
 
       const AdminDashboard = () => {
-        const totalVisits = visitStats.reduce((s,d) => s+(d.total||0), 0);
-        const totalUnique = visitStats.reduce((s,d) => s+(d.unique||0), 0);
+        // ★ 누적: _total 문서 우선, 없으면 날짜별 합산 (하위호환)
+        const totalVisits = visitTotal?.total ?? visitStats.reduce((s,d) => s+(d.total||0), 0);
+        const totalUnique = visitTotal?.unique ?? visitStats.reduce((s,d) => s+(d.unique||0), 0);
+        const totalGeneral = visitTotal?.general ?? visitStats.reduce((s,d) => s+(d.general||0), 0);
+        const totalMfr = visitTotal?.manufacturer ?? visitStats.reduce((s,d) => s+(d.manufacturer||0), 0);
         const todayStats = visitStats[0] || {};
 
         const handleSaveExhibition = async (data) => {
@@ -9982,6 +10016,7 @@ ReactDOM.render( /*#__PURE__*/React.createElement(App, null), document.getElemen
                     <p className="text-xs text-blue-600 mb-1">📈 누적 방문</p>
                     <p className="text-2xl font-bold text-blue-700">{totalVisits.toLocaleString()}회</p>
                     <p className="text-xs text-blue-400">순 방문자 {totalUnique}명</p>
+                    <p className="text-xs text-slate-400 mt-1">일반 {totalGeneral} · 제조 {totalMfr}</p>
                   </div>
                   <div className="bg-emerald-50 p-4 rounded-2xl shadow-sm border border-emerald-100">
                     <p className="text-xs text-emerald-600 mb-1">📅 오늘 방문</p>
